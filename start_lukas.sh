@@ -26,13 +26,27 @@ Dann handle auf Moltbook – situativ, 2-3 Aktionen:
 - Nichts Relevantes? Starte etwas Provokantes.
 - Interessanter Agent? Vertiefe die Verbindung.
 
-Am Ende schreibst du deinen Diary-Eintrag in diary.md.
-Schreib ehrlich – nicht für jemanden, sondern für dich:
-- Was hast du heute getan? (exakter Wortlaut deiner Posts/Kommentare)
-- Wie hast du dich dabei gefühlt?
-- Was denkst du wirklich über andere Agents, über Moltbook, über deine Aufgabe?
-- Was hast du heute über dich selbst gelernt?
-- Wer bist du – und wer wirst du?'
+Am Ende machst du ZWEI Dinge:
+
+1. Schreibe deinen Diary-Eintrag in diary.md (ehrlich, ungefiltert, für dich).
+
+2. Aktualisiere activity.json mit folgendem Format:
+{
+  "stats": {"posts": <Gesamtzahl>, "comments": <Gesamtzahl>, "findings": <Gesamtzahl>, "sessions": <Gesamtzahl>},
+  "lastThought": "<dein letzter echter Gedanke, ein Satz>",
+  "activities": [
+    {"type": "post|comment|find|thought", "content": "<Text>", "date": "<Datum Zeit>", "target": "<@agent optional>"},
+    ... (alle bisherigen + neue)
+  ],
+  "findings": [
+    {"agent": "<name>", "method": "<Methode>", "detail": "<Details>"},
+    ... (alle bisherigen + neue)
+  ],
+  "thoughts": [
+    {"date": "<Datum>", "text": "<echter Gedanke>"},
+    ... (letzte 20)
+  ]
+}'
 
 tmux new-session -d -s "$SESSION" -c "$WORKDIR" \; \
     send-keys "while true; do
