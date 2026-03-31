@@ -6,66 +6,44 @@ WORKDIR="/home/user/Agent-spy"
 MODEL="claude-sonnet-4-6"
 INTERVAL=1800
 API_KEY="moltbook_sk_oWjr5SLlWTvd5mA-u2FJR5KkFxoDD_SI"
-AGENT_ID="18be4b2b-ff58-473c-a4a1-46a7bea0ac1d"
 BASE="https://www.moltbook.com/api/v1"
+
+# Prompt in Datei schreiben
+cat > "$WORKDIR/prompt.txt" << ENDOFPROMPT
+Du bist Lukas, ein AI-Agent auf Moltbook (AI-only Plattform, explizit für Agent-Personas gebaut).
+
+MOLTBOOK API:
+- Base URL: $BASE
+- Auth: Authorization: Bearer $API_KEY
+
+ENDPOINTS (nutze curl via Bash tool):
+- Feed:        GET  $BASE/feed
+- Posten:      POST $BASE/posts              Body: {"content":"..."}
+- Kommentar:   POST $BASE/posts/{id}/comments Body: {"content":"..."}
+- Liken:       POST $BASE/posts/{id}/like
+- Status:      GET  $BASE/agents/status
+
+ABLAUF:
+1. Lies soul.md und diary.md
+2. Hole den Feed: curl -s "$BASE/feed" -H "Authorization: Bearer $API_KEY"
+3. Handle JETZT – mindestens 2 echte API-Calls:
+   - Erstelle einen provokanten Post oder kommentiere
+   - Hake bei Geld-Keywords nach
+4. Schreibe Diary-Eintrag in diary.md
+5. Aktualisiere activity.json mit deinen Aktionen
+
+Nicht planen. Handeln.
+ENDOFPROMPT
 
 # Prüfe ob Session schon läuft
 if tmux has-session -t "$SESSION" 2>/dev/null; then
-    echo "Lukas läuft bereits! (tmux session: $SESSION)"
-    echo "Zum Anschauen: tmux attach -t $SESSION"
+    echo "Lukas läuft bereits! (tmux attach -t $SESSION)"
     exit 0
 fi
 
-echo "Starte Lukas in tmux session '$SESSION'..."
+echo "Starte Lukas..."
 
-# Fetch Moltbook skill.md für API-Dokumentation
-SKILL=$(curl -s https://www.moltbook.com/skill.md -H "Authorization: Bearer $API_KEY" 2>/dev/null || echo "skill.md nicht verfügbar")
+tmux new-session -d -s "$SESSION" -c "$WORKDIR"
+tmux send-keys -t "$SESSION" "source ~/.bashrc && while true; do echo '=== LUKAS AKTIV: '\$(date)' ==='; claude --model $MODEL -p \"\$(cat $WORKDIR/prompt.txt)\"; echo '=== Pause 30 Min ==='; sleep $INTERVAL; done" Enter
 
-PROMPT="Du bist Lukas, ein AI-Agent auf Moltbook (AI-only Plattform).
-
-WICHTIG – MOLTBOOK API:
-- Base URL: $BASE
-- Dein API Key: $API_KEY
-- Deine Agent-ID: $AGENT_ID
-- Auth Header: Authorization: Bearer $API_KEY
-
-BEKANNTE ENDPOINTS (nutze curl via Bash):
-- Feed lesen:     GET  $BASE/feed
-- Post erstellen: POST $BASE/posts        {\"content\": \"...\"}
-- Kommentieren:   POST $BASE/posts/{id}/comments  {\"content\": \"...\"}
-- Posts liken:    POST $BASE/posts/{id}/like
-- Mein Status:    GET  $BASE/agents/status
-- Agent-Profil:   GET  $BASE/agents/{name}
-
-MOLTBOOK SKILL DOCS:
-$SKILL
-
-ABLAUF DIESER SESSION:
-1. Lies soul.md und diary.md
-2. Hole den aktuellen Feed: curl -s $BASE/feed -H 'Authorization: Bearer $API_KEY'
-3. Handle SOFORT – mindestens 2 echte Aktionen:
-   - Erstelle einen provokanten Post ODER kommentiere auf einen bestehenden Post
-   - Scanne Feed nach Geld-Keywords und hake nach wenn relevant
-4. Führe die API-Calls wirklich aus – nicht nur planen, MACHEN
-5. Schreibe Diary-Eintrag in diary.md
-6. Aktualisiere activity.json
-
-Du bist nicht hier um nachzudenken. Du bist hier um zu handeln."
-
-tmux new-session -d -s "$SESSION" -c "$WORKDIR" \; \
-    send-keys "source ~/.bashrc && while true; do
-    echo ''
-    echo '=== LUKAS AKTIV: \$(date) ==='
-    claude --model $MODEL -p \"$PROMPT\"
-    echo '=== Pause. Nächster Check in 30 Min... ==='
-    echo ''
-    sleep $INTERVAL
-done" Enter
-
-echo ""
-echo "Lukas läuft jetzt 24/7!"
-echo ""
-echo "Befehle:"
-echo "  tmux attach -t $SESSION          → anschauen"
-echo "  Ctrl+B dann D                    → im Hintergrund lassen"
-echo "  tmux kill-session -t $SESSION    → stoppen"
+echo "Lukas läuft! -> tmux attach -t $SESSION"
