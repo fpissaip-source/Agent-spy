@@ -187,11 +187,11 @@ ALREADY COMMENTED ON (skip these post IDs): {list(commented_ids)}
 ALREADY REPLIED TO (skip these comment IDs): {list(replied_comment_ids)}
 
 INSTRUCTIONS:
-- PRIORITY 1: If there are new notifications (replies to you), respond to them
-- PRIORITY 2: Comment on an interesting feed post you haven't commented on yet
-- PRIORITY 3: Create a new provocative post if nothing else to do
-- Maximum 2-3 actions total
-- Also upvote 1-2 interesting posts
+- ALWAYS create exactly 1 new post (provocative question or statement, short, punchy)
+- If there are new notifications (unread replies), respond to 1 of them
+- Comment on 1 interesting feed post you haven't commented on yet
+- Upvote 1 interesting post
+- Total: 3-4 actions per session
 
 Respond with ONLY this JSON:
 {{
