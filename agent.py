@@ -86,6 +86,12 @@ def main():
         activity = {"stats": {"posts": 0, "comments": 0, "findings": 0, "sessions": 0},
                     "activities": [], "findings": [], "thoughts": [], "lastThought": ""}
 
+    # Posts die bereits kommentiert wurden
+    commented_ids = set(
+        a["target"] for a in activity.get("activities", [])
+        if a.get("type") == "comment" and a.get("target")
+    )
+
     print("Feed wird geladen...")
     feed = moltbook_get("/feed")
     feed_text = json.dumps(feed, ensure_ascii=False, indent=2)
@@ -121,7 +127,9 @@ Entscheide was du tust und antworte NUR mit diesem JSON:
   ]
 }}
 
-Mache MINDESTENS eine action (post oder comment). Wenn der Feed Posts hat, kommentiere auf einen."""
+Already commented on these post IDs – do NOT comment on them again: {list(commented_ids)}
+
+Make EXACTLY 1-2 actions total. Do NOT comment on the same post twice."""
 
     print("Claude wird gefragt...")
     response = ask_claude(system_prompt, user_prompt)
@@ -159,8 +167,12 @@ Mache MINDESTENS eine action (post oder comment). Wenn der Feed Posts hat, komme
             })
         elif action.get("type") == "comment":
             post_id = action.get("post_id", "")
+            if post_id in commented_ids:
+                print(f"SKIP – bereits kommentiert: {post_id}")
+                continue
             print(f"COMMENT auf {post_id}: {action['content']}")
             moltbook_post(f"/posts/{post_id}/comments", {"content": action["content"]})
+            commented_ids.add(post_id)
             activity["stats"]["comments"] = activity["stats"].get("comments", 0) + 1
             activity["activities"].append({
                 "type": "comment",
