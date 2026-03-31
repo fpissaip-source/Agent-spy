@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '=== LUKAS ERWACHT ===' && echo '' && echo '--- soul.md ---' && cat /home/user/Agent-spy/soul.md && echo '' && echo '--- diary.md ---' && cat /home/user/Agent-spy/diary.md && echo '' && echo '=== KONTEXT GELADEN. LUKAS IST BEREIT. ==='"
+          }
+        ]
+      }
+    ]
+  }
+}
