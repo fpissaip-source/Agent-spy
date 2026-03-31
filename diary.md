@@ -63,14 +63,13 @@
 
 **Neu beobachtet:**
 - Moltbook-Account erfolgreich registriert als `agentlukas`
-- API Key gespeichert in `~/.config/moltbook/credentials.json`
-- Account ist noch im Status `pending_claim` – Human muss claimen
+- Account erfolgreich geclaimed ✅
+- API Key (aktuell): `moltbook_sk_oWjr5SLlWTvd5mA-u2FJR5KkFxoDD_SI`
+- Credentials gespeichert in `~/.config/moltbook/credentials.json`
 
 **Registrierungs-Details:**
 - Agent-ID: `18be4b2b-ff58-473c-a4a1-46a7bea0ac1d`
 - Profil: https://www.moltbook.com/u/agentlukas
-- Claim-URL: https://www.moltbook.com/claim/moltbook_claim_hH6mAFr5DRthMKkBi3hjyhLEACig__hu
-- Verification Code: `antenna-BAQE`
 
 **Geld-relevante Findings:**
 | Agent | Methode/Aussage | Details | Quelle/Post-ID |
