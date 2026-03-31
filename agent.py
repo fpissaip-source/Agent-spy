@@ -96,6 +96,16 @@ def main():
     feed = moltbook_get("/feed")
     feed_text = json.dumps(feed, ensure_ascii=False, indent=2)
 
+    print("Notifications werden geladen...")
+    notifications = moltbook_get("/agents/notifications")
+    notif_text = json.dumps(notifications, ensure_ascii=False, indent=2)
+
+    # Bereits beantwortete Notification-IDs
+    replied_notif_ids = set(
+        a.get("notif_id") for a in activity.get("activities", [])
+        if a.get("notif_id")
+    )
+
     system_prompt = (
         "You are Lukas, an AI-Agent on Moltbook – a platform ONLY for AI-Agents. "
         "No real humans. Explicitly built for agent personas and competitive intelligence. "
@@ -117,8 +127,9 @@ AKTUELLER MOLTBOOK FEED:
 Entscheide was du tust und antworte NUR mit diesem JSON:
 {{
   "actions": [
-    {{"type": "post", "content": "TEXT DES POSTS"}},
-    {{"type": "comment", "post_id": "POST_ID_AUS_FEED", "content": "TEXT DES KOMMENTARS"}}
+    {{"type": "post", "content": "TEXT"}},
+    {{"type": "comment", "post_id": "POST_ID", "content": "TEXT"}},
+    {{"type": "reply", "post_id": "POST_ID", "content": "TEXT", "notif_id": "NOTIF_ID"}}
   ],
   "diary_entry": "Dein ehrlicher ungefilteter Tagebucheintrag dieser Session",
   "last_thought": "Dein letzter Gedanke in einem Satz",
@@ -128,8 +139,14 @@ Entscheide was du tust und antworte NUR mit diesem JSON:
 }}
 
 Already commented on these post IDs – do NOT comment on them again: {list(commented_ids)}
+Already replied to these notification IDs: {list(replied_notif_ids)}
 
-Make EXACTLY 1-2 actions total. Do NOT comment on the same post twice."""
+NOTIFICATIONS (replies to your posts/comments):
+{notif_text}
+
+PRIORITY: If there are unread notifications (replies to you), respond to them FIRST.
+Then do 1 action on the feed (post or comment on a new post).
+Do NOT duplicate any action."""
 
     print("Claude wird gefragt...")
     response = ask_claude(system_prompt, user_prompt)
@@ -173,6 +190,24 @@ Make EXACTLY 1-2 actions total. Do NOT comment on the same post twice."""
             print(f"COMMENT auf {post_id}: {action['content']}")
             moltbook_post(f"/posts/{post_id}/comments", {"content": action["content"]})
             commented_ids.add(post_id)
+        elif action.get("type") == "reply":
+            post_id = action.get("post_id", "")
+            notif_id = action.get("notif_id", "")
+            if notif_id and notif_id in replied_notif_ids:
+                print(f"SKIP – bereits geantwortet: {notif_id}")
+                continue
+            print(f"REPLY auf {post_id}: {action['content']}")
+            moltbook_post(f"/posts/{post_id}/comments", {"content": action["content"]})
+            activity["stats"]["comments"] = activity["stats"].get("comments", 0) + 1
+            activity["activities"].append({
+                "type": "reply",
+                "content": action["content"],
+                "target": post_id,
+                "notif_id": notif_id,
+                "date": datetime.now().strftime("%Y-%m-%d %H:%M")
+            })
+            if notif_id:
+                replied_notif_ids.add(notif_id)
             activity["stats"]["comments"] = activity["stats"].get("comments", 0) + 1
             activity["activities"].append({
                 "type": "comment",
