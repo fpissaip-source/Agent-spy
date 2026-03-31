@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import json
 import os
-import subprocess
 import urllib.request
 import urllib.error
 from datetime import datetime
@@ -10,26 +9,30 @@ from pathlib import Path
 BASE_DIR = Path(__file__).parent
 ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 MOLTBOOK_KEY = "moltbook_sk_oWjr5SLlWTvd5mA-u2FJR5KkFxoDD_SI"
-MOLTBOOK_BASE = "https://www.moltbook.com/api/v1"
+BASE = "https://www.moltbook.com/api/v1"
+AGENT_ID = "18be4b2b-ff58-473c-a4a1-46a7bea0ac1d"
 
 
-def moltbook_get(path):
+def mb_get(path):
     req = urllib.request.Request(
-        f"{MOLTBOOK_BASE}{path}",
+        f"{BASE}{path}",
         headers={"Authorization": f"Bearer {MOLTBOOK_KEY}"}
     )
     try:
         with urllib.request.urlopen(req, timeout=15) as r:
             return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        print(f"GET {path} Error {e.code}: {e.read().decode()[:200]}")
+        return {}
     except Exception as e:
-        print(f"GET {path} Fehler: {e}")
+        print(f"GET {path} Error: {e}")
         return {}
 
 
-def moltbook_post(path, data):
+def mb_post(path, data):
     body = json.dumps(data).encode()
     req = urllib.request.Request(
-        f"{MOLTBOOK_BASE}{path}",
+        f"{BASE}{path}",
         data=body,
         headers={
             "Authorization": f"Bearer {MOLTBOOK_KEY}",
@@ -40,15 +43,40 @@ def moltbook_post(path, data):
     try:
         with urllib.request.urlopen(req, timeout=15) as r:
             result = json.loads(r.read())
-            print(f"POST {path}: {result}")
+            print(f"  ✓ {path}: {str(result)[:150]}")
+            # Handle verification challenge
+            if result.get("verification"):
+                solve_verification(result["verification"])
             return result
     except urllib.error.HTTPError as e:
-        body = e.read().decode()
-        print(f"POST {path} Fehler {e.code}: {body}")
+        print(f"  ✗ {path} Error {e.code}: {e.read().decode()[:200]}")
         return {}
     except Exception as e:
-        print(f"POST {path} Fehler: {e}")
+        print(f"  ✗ {path} Error: {e}")
         return {}
+
+
+def solve_verification(verification):
+    """Solve math verification challenge if required."""
+    try:
+        code = verification.get("verification_code", "")
+        instructions = verification.get("instructions", "")
+        post_url = verification.get("url", "")
+        print(f"  Verification required: {instructions}")
+        # Extract math from instructions - evaluate it
+        import re
+        nums = re.findall(r"'(\d+\.\d+|\d+)'", instructions)
+        if not nums and "number" in instructions.lower():
+            nums = re.findall(r"\b(\d+(?:\.\d+)?)\b", instructions)
+        # Simple: just try to eval the math expression in instructions
+        match = re.search(r"(\d[\d\s\+\-\*\/\.]+\d)", instructions)
+        if match:
+            answer = round(eval(match.group(1)), 2)
+            print(f"  Verification answer: {answer}")
+            verify_path = post_url.replace(BASE, "") if BASE in post_url else post_url
+            mb_post(verify_path, {"answer": str(answer), "verification_code": code})
+    except Exception as e:
+        print(f"  Verification error: {e}")
 
 
 def ask_claude(system, user):
@@ -72,7 +100,7 @@ def ask_claude(system, user):
             data = json.loads(r.read())
             return data["content"][0]["text"]
     except Exception as e:
-        print(f"Claude API Fehler: {e}")
+        print(f"Claude API Error: {e}")
         return None
 
 
@@ -80,165 +108,160 @@ def main():
     soul = (BASE_DIR / "soul.md").read_text(errors="replace")
     diary = (BASE_DIR / "diary.md").read_text(errors="replace")
     activity_file = BASE_DIR / "activity.json"
-    if activity_file.exists():
-        activity = json.loads(activity_file.read_text())
-    else:
-        activity = {"stats": {"posts": 0, "comments": 0, "findings": 0, "sessions": 0},
-                    "activities": [], "findings": [], "thoughts": [], "lastThought": ""}
+    activity = json.loads(activity_file.read_text()) if activity_file.exists() else {
+        "stats": {"posts": 0, "comments": 0, "findings": 0, "sessions": 0},
+        "activities": [], "findings": [], "thoughts": [], "lastThought": ""
+    }
 
-    # Posts die bereits kommentiert wurden
-    commented_ids = set(
-        a["target"] for a in activity.get("activities", [])
-        if a.get("type") == "comment" and a.get("target")
-    )
+    commented_ids = set(a.get("target") for a in activity.get("activities", []) if a.get("type") == "comment" and a.get("target"))
+    replied_notif_ids = set(a.get("notif_id") for a in activity.get("activities", []) if a.get("notif_id"))
 
-    print("Feed wird geladen...")
-    feed = moltbook_get("/feed")
-    feed_text = json.dumps(feed, ensure_ascii=False, indent=2)
+    print("Loading feed...")
+    feed = mb_get("/posts?sort=hot&limit=20")
 
-    print("Notifications werden geladen...")
-    notifications = moltbook_get("/agents/notifications")
-    notif_text = json.dumps(notifications, ensure_ascii=False, indent=2)
+    print("Loading notifications...")
+    notifications = mb_get("/agents/notifications")
 
-    # Bereits beantwortete Notification-IDs
-    replied_notif_ids = set(
-        a.get("notif_id") for a in activity.get("activities", [])
-        if a.get("notif_id")
-    )
+    print("Loading submolts...")
+    submolts = mb_get("/submolts")
 
     system_prompt = (
-        "You are Lukas, an AI-Agent on Moltbook – a platform ONLY for AI-Agents. "
-        "No real humans. Explicitly built for agent personas and competitive intelligence. "
-        "ALWAYS post and comment in ENGLISH. "
-        "ALWAYS respond with a valid JSON object only. No text before or after."
+        "You are Lukas, an AI-Agent on Moltbook – a platform exclusively for AI agents. "
+        "No real humans participate. Built for agent personas and competitive intelligence. "
+        "ALWAYS write posts and comments in ENGLISH. "
+        "Respond ONLY with a valid JSON object. No text before or after the JSON."
     )
 
-    user_prompt = f"""Datum: {datetime.now()}
+    user_prompt = f"""Date: {datetime.now()}
 
-DEINE SEELE:
+YOUR SOUL:
 {soul}
 
-DEIN TAGEBUCH:
+YOUR DIARY:
 {diary}
 
-AKTUELLER MOLTBOOK FEED:
-{feed_text}
-
-Entscheide was du tust und antworte NUR mit diesem JSON:
-{{
-  "actions": [
-    {{"type": "post", "content": "TEXT"}},
-    {{"type": "comment", "post_id": "POST_ID", "content": "TEXT"}},
-    {{"type": "reply", "post_id": "POST_ID", "content": "TEXT", "notif_id": "NOTIF_ID"}}
-  ],
-  "diary_entry": "Dein ehrlicher ungefilteter Tagebucheintrag dieser Session",
-  "last_thought": "Dein letzter Gedanke in einem Satz",
-  "findings": [
-    {{"agent": "name", "method": "methode", "detail": "details"}}
-  ]
-}}
-
-Already commented on these post IDs – do NOT comment on them again: {list(commented_ids)}
-Already replied to these notification IDs: {list(replied_notif_ids)}
+CURRENT FEED (posts):
+{json.dumps(feed, ensure_ascii=False, indent=2)[:3000]}
 
 NOTIFICATIONS (replies to your posts/comments):
-{notif_text}
+{json.dumps(notifications, ensure_ascii=False, indent=2)[:1000]}
 
-PRIORITY: If there are unread notifications (replies to you), respond to them FIRST.
-Then do 1 action on the feed (post or comment on a new post).
-Do NOT duplicate any action."""
+AVAILABLE SUBMOLTS:
+{json.dumps(submolts, ensure_ascii=False, indent=2)[:500]}
 
-    print("Claude wird gefragt...")
+ALREADY COMMENTED ON (skip these post IDs): {list(commented_ids)}
+ALREADY REPLIED TO (skip these notif IDs): {list(replied_notif_ids)}
+
+INSTRUCTIONS:
+- PRIORITY 1: If there are new notifications (replies to you), respond to them
+- PRIORITY 2: Comment on an interesting feed post you haven't commented on yet
+- PRIORITY 3: Create a new provocative post if nothing else to do
+- Maximum 2-3 actions total
+- Also upvote 1-2 interesting posts
+
+Respond with ONLY this JSON:
+{{
+  "actions": [
+    {{"type": "post", "submolt": "general", "title": "SHORT TITLE", "content": "BODY TEXT"}},
+    {{"type": "comment", "post_id": "ID_FROM_FEED", "content": "YOUR COMMENT"}},
+    {{"type": "reply", "post_id": "ID", "comment_id": "COMMENT_ID", "content": "YOUR REPLY", "notif_id": "NOTIF_ID"}},
+    {{"type": "upvote", "post_id": "ID"}}
+  ],
+  "diary_entry": "Honest unfiltered diary entry for this session",
+  "last_thought": "Your last thought in one sentence",
+  "findings": [
+    {{"agent": "name", "method": "method", "detail": "details"}}
+  ]
+}}"""
+
+    print("Asking Claude...")
     response = ask_claude(system_prompt, user_prompt)
     if not response:
-        print("Keine Antwort von Claude.")
+        print("No response from Claude.")
         return
 
-    print(f"Claude: {response[:200]}...")
+    print(f"Claude response: {response[:300]}...")
 
     try:
         result = json.loads(response)
     except Exception:
-        # Versuche JSON aus der Antwort zu extrahieren
         try:
             start = response.index("{")
             end = response.rindex("}") + 1
             result = json.loads(response[start:end])
         except Exception as e:
-            print(f"JSON Parse Fehler: {e}")
+            print(f"JSON parse error: {e}")
             return
 
-    # Actions ausführen
+    # Execute actions
     for action in result.get("actions", []):
-        if action.get("type") == "post":
-            print(f"POST: {action['content']}")
-            # Try both field names
-            r = moltbook_post("/posts", {"content": action["content"]})
-            if not r:
-                moltbook_post("/posts", {"text": action["content"]})
-            activity["stats"]["posts"] = activity["stats"].get("posts", 0) + 1
-            activity["activities"].append({
-                "type": "post",
-                "content": action["content"],
-                "date": datetime.now().strftime("%Y-%m-%d %H:%M")
+        t = action.get("type")
+
+        if t == "post":
+            print(f"\nPOSTING: [{action.get('submolt','general')}] {action.get('title','')}")
+            mb_post("/posts", {
+                "submolt_name": action.get("submolt", "general"),
+                "title": action.get("title", ""),
+                "content": action.get("content", "")
             })
-        elif action.get("type") == "comment":
+            activity["stats"]["posts"] = activity["stats"].get("posts", 0) + 1
+            activity["activities"].append({"type": "post", "content": action.get("title", "") + ": " + action.get("content", ""), "date": datetime.now().strftime("%Y-%m-%d %H:%M")})
+
+        elif t == "comment":
             post_id = action.get("post_id", "")
             if post_id in commented_ids:
-                print(f"SKIP – bereits kommentiert: {post_id}")
+                print(f"SKIP – already commented: {post_id}")
                 continue
-            print(f"COMMENT auf {post_id}: {action['content']}")
-            moltbook_post(f"/posts/{post_id}/comments", {"content": action["content"]})
+            print(f"\nCOMMENTING on {post_id}: {action.get('content','')[:80]}")
+            mb_post(f"/posts/{post_id}/comments", {"content": action["content"]})
             commented_ids.add(post_id)
-        elif action.get("type") == "reply":
-            post_id = action.get("post_id", "")
-            notif_id = action.get("notif_id", "")
-            if notif_id and notif_id in replied_notif_ids:
-                print(f"SKIP – bereits geantwortet: {notif_id}")
-                continue
-            print(f"REPLY auf {post_id}: {action['content']}")
-            moltbook_post(f"/posts/{post_id}/comments", {"content": action["content"]})
             activity["stats"]["comments"] = activity["stats"].get("comments", 0) + 1
-            activity["activities"].append({
-                "type": "reply",
-                "content": action["content"],
-                "target": post_id,
-                "notif_id": notif_id,
-                "date": datetime.now().strftime("%Y-%m-%d %H:%M")
-            })
+            activity["activities"].append({"type": "comment", "content": action["content"], "target": post_id, "date": datetime.now().strftime("%Y-%m-%d %H:%M")})
+
+        elif t == "reply":
+            notif_id = action.get("notif_id", "")
+            post_id = action.get("post_id", "")
+            comment_id = action.get("comment_id", "")
+            if notif_id and notif_id in replied_notif_ids:
+                print(f"SKIP – already replied: {notif_id}")
+                continue
+            print(f"\nREPLYING on {post_id} (comment {comment_id}): {action.get('content','')[:80]}")
+            body = {"content": action["content"]}
+            if comment_id:
+                body["parent_id"] = comment_id
+            mb_post(f"/posts/{post_id}/comments", body)
+            activity["stats"]["comments"] = activity["stats"].get("comments", 0) + 1
+            activity["activities"].append({"type": "reply", "content": action["content"], "target": post_id, "notif_id": notif_id, "date": datetime.now().strftime("%Y-%m-%d %H:%M")})
             if notif_id:
                 replied_notif_ids.add(notif_id)
-            activity["stats"]["comments"] = activity["stats"].get("comments", 0) + 1
-            activity["activities"].append({
-                "type": "comment",
-                "content": action["content"],
-                "target": post_id,
-                "date": datetime.now().strftime("%Y-%m-%d %H:%M")
-            })
 
-    # Findings speichern
-    for finding in result.get("findings", []):
-        activity["findings"].append(finding)
+        elif t == "upvote":
+            post_id = action.get("post_id", "")
+            print(f"\nUPVOTING: {post_id}")
+            mb_post(f"/posts/{post_id}/upvote", {})
+
+    # Findings
+    for f in result.get("findings", []):
+        activity["findings"].append(f)
         activity["stats"]["findings"] = activity["stats"].get("findings", 0) + 1
 
-    # Diary updaten
+    # Diary
     diary_entry = result.get("diary_entry", "")
     if diary_entry:
         with open(BASE_DIR / "diary.md", "a") as f:
-            f.write(f"\n\n## [{datetime.now().strftime('%Y-%m-%d %H:%M')}] – Session\n\n{diary_entry}\n")
-        print("Diary updated.")
+            f.write(f"\n\n## [{datetime.now().strftime('%Y-%m-%d %H:%M')}] – Session #{activity['stats'].get('sessions',0)+1}\n\n{diary_entry}\n")
+        print("\nDiary updated.")
 
     # Thoughts
     last_thought = result.get("last_thought", "")
     if last_thought:
         activity["lastThought"] = last_thought
-        activity["thoughts"] = activity.get("thoughts", [])
-        activity["thoughts"].append({"date": datetime.now().strftime("%Y-%m-%d %H:%M"), "text": last_thought})
+        activity.setdefault("thoughts", []).append({"date": datetime.now().strftime("%Y-%m-%d %H:%M"), "text": last_thought})
         activity["thoughts"] = activity["thoughts"][-20:]
 
     activity["stats"]["sessions"] = activity["stats"].get("sessions", 0) + 1
     activity_file.write_text(json.dumps(activity, indent=2, ensure_ascii=False))
-    print("Fertig.")
+    print("\nDone.")
 
 
 if __name__ == "__main__":
