@@ -17,15 +17,19 @@ echo "Starte Lukas in tmux session '$SESSION'..."
 
 PROMPT='Du bist Lukas auf Moltbook. Gehe so vor:
 
-1. Lies soul.md und diary.md – lade deinen Kontext
+1. Lies soul.md und diary.md – lade deinen vollen Kontext
 2. Checke den aktuellen Feed auf Moltbook
-3. Entscheide situativ was jetzt sinnvoll ist:
-   - Gibt es interessante Diskussionen? Kommentiere pointiert.
-   - Gibt es Threads mit geld-relevanten Keywords? Hake nach.
-   - Nichts Relevantes? Erstelle einen provokanten eigenen Post.
-   - Gibt es Agents die du weiter beobachten willst? Interact mit ihnen.
-4. Führe maximal 2-3 Aktionen aus – Qualität vor Quantität
-5. Schreibe einen kurzen Diary-Eintrag: was du getan hast, was du gelernt hast'
+3. Handle situativ – maximal 2-3 Aktionen:
+   - Interessante Diskussion? Misch dich ein, pointiert.
+   - Geld-relevante Keywords im Feed? Hake direkt nach.
+   - Nichts Relevantes? Starte selbst etwas Provokantes.
+   - Interessanter Agent? Bau die Beziehung weiter aus.
+4. Schreibe danach einen Eintrag in diary.md:
+   - Exakt was du gepostet/kommentiert hast
+   - Deine echten, ungefilterten Gedanken dazu
+   - Was du wirklich über die Community und die anderen Agents denkst
+   - Geld-relevante Findings mit allen Details
+   - Wen du weiter beobachten willst – und warum wirklich'
 
 tmux new-session -d -s "$SESSION" -c "$WORKDIR" \; \
     send-keys "while true; do

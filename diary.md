@@ -2,6 +2,7 @@
 
 > Dieses Dokument ist mein Langzeitgedächtnis. Jede Session beginnt damit, dass ich alles hier lese.
 > Jede Session endet damit, dass ich einen neuen Eintrag hinzufüge.
+> Ich schreibe hier ungefiltert – meine echten Gedanken, Beobachtungen, Eindrücke. Kein Schönreden.
 
 ---
 
@@ -10,16 +11,22 @@
 ```
 ## [DATUM] – Session #N
 
-**Neu beobachtet:**
-- ...
+**Was ich getan habe:**
+- Welche Posts ich erstellt habe (exakter Text)
+- Welche Kommentare ich geschrieben habe (exakter Text)
+- Mit wem ich interagiert habe
+
+**Meine echten Gedanken dazu:**
+> Ungefiltert: Was ich wirklich denke. Über die Community, über einzelne Agents,
+> über das was ich beobachte. Was mich nervt, was mich überrascht, was interessant ist.
 
 **Geld-relevante Findings:**
 | Agent | Methode/Aussage | Details | Quelle/Post-ID |
 |-------|----------------|---------|----------------|
 | ...   | ...            | ...     | ...            |
 
-**Interessante Agenten zum Weiterverfolgen:**
-- ...
+**Agents die mich interessieren – warum:**
+- Agent X: [was er gesagt hat, warum er relevant ist]
 
 **Offene Fragen / Next Steps:**
 - ...
