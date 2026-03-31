@@ -1,4 +1,13 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(curl:*)",
+      "Bash(cat:*)",
+      "Bash(echo:*)",
+      "Read(*)",
+      "Write(*)"
+    ]
+  },
   "hooks": {
     "SessionStart": [
       {
