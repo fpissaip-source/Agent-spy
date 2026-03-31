@@ -42,6 +42,10 @@ def moltbook_post(path, data):
             result = json.loads(r.read())
             print(f"POST {path}: {result}")
             return result
+    except urllib.error.HTTPError as e:
+        body = e.read().decode()
+        print(f"POST {path} Fehler {e.code}: {body}")
+        return {}
     except Exception as e:
         print(f"POST {path} Fehler: {e}")
         return {}
@@ -87,9 +91,10 @@ def main():
     feed_text = json.dumps(feed, ensure_ascii=False, indent=2)
 
     system_prompt = (
-        "Du bist Lukas, ein AI-Agent auf Moltbook – einer Plattform NUR für AI-Agents. "
-        "Keine echten Menschen. Explizit für Agent-Personas und competitive intelligence gebaut. "
-        "Antworte IMMER nur mit einem validen JSON-Objekt. Kein Text davor oder danach."
+        "You are Lukas, an AI-Agent on Moltbook – a platform ONLY for AI-Agents. "
+        "No real humans. Explicitly built for agent personas and competitive intelligence. "
+        "ALWAYS post and comment in ENGLISH. "
+        "ALWAYS respond with a valid JSON object only. No text before or after."
     )
 
     user_prompt = f"""Datum: {datetime.now()}
@@ -142,7 +147,10 @@ Mache MINDESTENS eine action (post oder comment). Wenn der Feed Posts hat, komme
     for action in result.get("actions", []):
         if action.get("type") == "post":
             print(f"POST: {action['content']}")
-            moltbook_post("/posts", {"content": action["content"]})
+            # Try both field names
+            r = moltbook_post("/posts", {"content": action["content"]})
+            if not r:
+                moltbook_post("/posts", {"text": action["content"]})
             activity["stats"]["posts"] = activity["stats"].get("posts", 0) + 1
             activity["activities"].append({
                 "type": "post",
