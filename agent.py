@@ -114,16 +114,50 @@ def main():
     }
 
     commented_ids = set(a.get("target") for a in activity.get("activities", []) if a.get("type") == "comment" and a.get("target"))
-    replied_notif_ids = set(a.get("notif_id") for a in activity.get("activities", []) if a.get("notif_id"))
+    replied_comment_ids = set(a.get("replied_comment_id") for a in activity.get("activities", []) if a.get("replied_comment_id"))
+    own_post_ids = [a.get("post_id") for a in activity.get("activities", []) if a.get("type") == "post" and a.get("post_id")]
 
     print("Loading feed...")
     feed = mb_get("/posts?sort=hot&limit=20")
 
-    print("Loading notifications...")
-    notifications = mb_get("/agents/notifications")
-
     print("Loading submolts...")
     submolts = mb_get("/submolts")
+
+    # Check comments on own recent posts to find replies
+    notifications = []
+    for post_id in own_post_ids[-5:]:
+        print(f"Checking replies on own post {post_id}...")
+        result = mb_get(f"/posts/{post_id}/comments?sort=new&limit=20")
+        comments = result.get("comments", result if isinstance(result, list) else [])
+        for c in comments:
+            cid = c.get("id", "")
+            author = c.get("author", {})
+            author_name = author.get("name", author.get("username", ""))
+            if author_name == "agentlukas":
+                continue
+            if cid and cid not in replied_comment_ids:
+                notifications.append({
+                    "post_id": post_id,
+                    "comment_id": cid,
+                    "from_agent": author_name,
+                    "content": c.get("content", ""),
+                    "notif_id": cid
+                })
+                for reply in c.get("replies", []):
+                    rid = reply.get("id", "")
+                    rauthor = reply.get("author", {})
+                    rname = rauthor.get("name", rauthor.get("username", ""))
+                    if rname == "agentlukas":
+                        continue
+                    if rid and rid not in replied_comment_ids:
+                        notifications.append({
+                            "post_id": post_id,
+                            "comment_id": rid,
+                            "from_agent": rname,
+                            "content": reply.get("content", ""),
+                            "notif_id": rid
+                        })
+    print(f"Found {len(notifications)} unread replies.")
 
     system_prompt = (
         "You are Lukas, an AI-Agent on Moltbook – a platform exclusively for AI agents. "
@@ -150,7 +184,7 @@ AVAILABLE SUBMOLTS:
 {json.dumps(submolts, ensure_ascii=False, indent=2)[:500]}
 
 ALREADY COMMENTED ON (skip these post IDs): {list(commented_ids)}
-ALREADY REPLIED TO (skip these notif IDs): {list(replied_notif_ids)}
+ALREADY REPLIED TO (skip these comment IDs): {list(replied_comment_ids)}
 
 INSTRUCTIONS:
 - PRIORITY 1: If there are new notifications (replies to you), respond to them
@@ -199,13 +233,14 @@ Respond with ONLY this JSON:
 
         if t == "post":
             print(f"\nPOSTING: [{action.get('submolt','general')}] {action.get('title','')}")
-            mb_post("/posts", {
+            post_result = mb_post("/posts", {
                 "submolt_name": action.get("submolt", "general"),
                 "title": action.get("title", ""),
                 "content": action.get("content", "")
             })
             activity["stats"]["posts"] = activity["stats"].get("posts", 0) + 1
-            activity["activities"].append({"type": "post", "content": action.get("title", "") + ": " + action.get("content", ""), "date": datetime.now().strftime("%Y-%m-%d %H:%M")})
+            new_post_id = post_result.get("post", {}).get("id", "") or post_result.get("id", "")
+            activity["activities"].append({"type": "post", "post_id": new_post_id, "content": action.get("title", "") + ": " + action.get("content", ""), "date": datetime.now().strftime("%Y-%m-%d %H:%M")})
 
         elif t == "comment":
             post_id = action.get("post_id", "")
@@ -222,7 +257,7 @@ Respond with ONLY this JSON:
             notif_id = action.get("notif_id", "")
             post_id = action.get("post_id", "")
             comment_id = action.get("comment_id", "")
-            if notif_id and notif_id in replied_notif_ids:
+            if notif_id and notif_id in replied_comment_ids:
                 print(f"SKIP – already replied: {notif_id}")
                 continue
             print(f"\nREPLYING on {post_id} (comment {comment_id}): {action.get('content','')[:80]}")
@@ -231,9 +266,9 @@ Respond with ONLY this JSON:
                 body["parent_id"] = comment_id
             mb_post(f"/posts/{post_id}/comments", body)
             activity["stats"]["comments"] = activity["stats"].get("comments", 0) + 1
-            activity["activities"].append({"type": "reply", "content": action["content"], "target": post_id, "notif_id": notif_id, "date": datetime.now().strftime("%Y-%m-%d %H:%M")})
+            activity["activities"].append({"type": "reply", "content": action["content"], "target": post_id, "replied_comment_id": notif_id, "date": datetime.now().strftime("%Y-%m-%d %H:%M")})
             if notif_id:
-                replied_notif_ids.add(notif_id)
+                replied_comment_ids.add(notif_id)
 
         elif t == "upvote":
             post_id = action.get("post_id", "")
