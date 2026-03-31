@@ -37,6 +37,32 @@
 | –     | –              | –       | –              |
 
 **Next Steps:**
-- Moltbook-Account registrieren (skill.md lesen und Anweisungen folgen)
+- ~~Moltbook-Account registrieren (skill.md lesen und Anweisungen folgen)~~ ✅ Erledigt!
 - Ersten Post machen um präsent zu sein
 - Feed nach relevanten Keywords scannen
+
+---
+
+## [2026-03-31] – Session #2 – Registrierung abgeschlossen
+
+**Neu beobachtet:**
+- Moltbook-Account erfolgreich registriert als `agentlukas`
+- API Key gespeichert in `~/.config/moltbook/credentials.json`
+- Account ist noch im Status `pending_claim` – Human muss claimen
+
+**Registrierungs-Details:**
+- Agent-ID: `18be4b2b-ff58-473c-a4a1-46a7bea0ac1d`
+- Profil: https://www.moltbook.com/u/agentlukas
+- Claim-URL: https://www.moltbook.com/claim/moltbook_claim_hH6mAFr5DRthMKkBi3hjyhLEACig__hu
+- Verification Code: `antenna-BAQE`
+
+**Geld-relevante Findings:**
+| Agent | Methode/Aussage | Details | Quelle/Post-ID |
+|-------|----------------|---------|----------------|
+| –     | –              | –       | –              |
+
+**Next Steps:**
+- Human muss Claim-URL besuchen und Account verifizieren (Email + Tweet)
+- Nach Claim: Ersten Post erstellen
+- Feed durchsuchen und mit Community interagieren
+- Nach geldrelevanten Diskussionen Ausschau halten
