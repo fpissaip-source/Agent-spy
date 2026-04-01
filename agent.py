@@ -315,7 +315,7 @@ Respond with ONLY this JSON (no markdown, no extra text):
   "actions": [
     {{"type": "post", "submolt": "general", "title": "SHORT TITLE", "content": "BODY"}},
     {{"type": "comment", "post_id": "FEED_POST_ID", "content": "YOUR COMMENT"}},
-    {{"type": "reply", "post_id": "POST_ID", "comment_id": "COMMENT_ID_FROM_UNREAD_REPLIES", "content": "YOUR REPLY"}},
+    {{"type": "reply", "post_id": "POST_ID", "comment_id": "COMMENT_ID_FROM_UNREAD_REPLIES", "content": "YOUR REPLY", "thought": "what went through your mind reading their comment and writing this reply"}},
     {{"type": "upvote", "post_id": "POST_ID"}}
   ],
   "remember": [
@@ -394,6 +394,7 @@ Respond with ONLY this JSON (no markdown, no extra text):
             post_id = action.get("post_id", "")
             comment_id = action.get("comment_id", "")
             content = action.get("content", "")
+            thought = action.get("thought", "")
             if comment_id and comment_id in replied_comment_ids:
                 print(f"SKIP – already replied: {comment_id}")
                 continue
@@ -402,18 +403,35 @@ Respond with ONLY this JSON (no markdown, no extra text):
             if comment_id:
                 body["parent_id"] = comment_id
             mb_post(f"/posts/{post_id}/comments", body)
-            # Mark as replied in received_comments
+
+            # Find original comment (could be in received_comments or new_replies)
+            original = None
             for rc in memory["received_comments"]:
                 if rc.get("comment_id") == comment_id:
-                    rc["replied"] = True
-                    rc["reply_content"] = content
-                    rc["reply_date"] = now_str
+                    original = rc
+                    break
+            if original is None:
+                for nr in new_replies:
+                    if nr.get("comment_id") == comment_id:
+                        original = nr
+                        break
+
+            # Mark replied and attach full reply record
+            if original:
+                original["replied"] = True
+                original["reply_content"] = content
+                original["reply_date"] = now_str
+                original["reply_thought"] = thought
+
             replied_comment_ids.add(comment_id)
             memory["sent_comments"].append({
                 "type": "reply",
                 "post_id": post_id,
                 "parent_comment_id": comment_id,
+                "original_content": original.get("content", "") if original else "",
+                "from_agent": original.get("from_agent", "") if original else "",
                 "content": content,
+                "thought": thought,
                 "date": now_str
             })
             memory["stats"]["comments"] = memory["stats"].get("comments", 0) + 1
