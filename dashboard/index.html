@@ -3,483 +3,859 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Lukas – Agent Dashboard</title>
+<title>Lukas – Agent Intelligence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
   :root {
-    --bg: #0a0a0f;
-    --surface: #111118;
-    --surface2: #1a1a24;
-    --accent: #6c63ff;
-    --accent2: #ff6584;
-    --accent3: #43e97b;
-    --text: #e0e0ff;
-    --muted: #666688;
-    --border: rgba(108,99,255,0.15);
-    --glow: rgba(108,99,255,0.4);
+    --bg: #06060b;
+    --surface: rgba(15, 15, 25, 0.6);
+    --surface-solid: #0f0f19;
+    --card: rgba(20, 20, 35, 0.5);
+    --accent: #7c6aff;
+    --accent-bright: #9d8cff;
+    --pink: #ff5c8a;
+    --green: #00e87b;
+    --yellow: #ffbe0b;
+    --cyan: #00d4ff;
+    --text: #eeeeff;
+    --text-secondary: #8888aa;
+    --text-muted: #555570;
+    --border: rgba(124, 106, 255, 0.08);
+    --border-hover: rgba(124, 106, 255, 0.2);
+    --glow-accent: rgba(124, 106, 255, 0.3);
+    --glow-pink: rgba(255, 92, 138, 0.3);
+    --glow-green: rgba(0, 232, 123, 0.3);
   }
 
   body {
     background: var(--bg);
     color: var(--text);
-    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
     min-height: 100vh;
     overflow-x: hidden;
   }
 
-  /* ── HEADER ── */
-  header {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    padding: 20px 32px;
-    border-bottom: 1px solid var(--border);
-    background: rgba(10,10,15,0.8);
-    backdrop-filter: blur(20px);
-    position: sticky;
-    top: 0;
-    z-index: 100;
-  }
-
-  .avatar {
-    width: 40px; height: 40px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, var(--accent), var(--accent2));
-    display: flex; align-items: center; justify-content: center;
-    font-weight: 700; font-size: 16px;
-    box-shadow: 0 0 20px var(--glow);
-  }
-
-  header h1 { font-size: 18px; font-weight: 600; }
-  header .sub { font-size: 12px; color: var(--muted); }
-
-  .status-dot {
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    background: var(--accent3);
-    box-shadow: 0 0 8px var(--accent3);
-    animation: pulse-dot 2s infinite;
-    margin-left: auto;
-  }
-  @keyframes pulse-dot {
-    0%,100% { opacity: 1; transform: scale(1); }
-    50% { opacity: 0.5; transform: scale(0.8); }
-  }
-
-  /* ── LAYOUT ── */
-  .layout {
-    display: grid;
-    grid-template-columns: 1fr 340px;
-    grid-template-rows: auto 1fr;
-    gap: 20px;
-    padding: 24px 32px;
-    max-width: 1400px;
-    margin: 0 auto;
-  }
-
-  /* ── BRAIN ── */
-  .brain-section {
-    grid-column: 1 / -1;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 16px;
-    padding: 24px;
-    display: flex;
-    align-items: center;
-    gap: 32px;
-    overflow: hidden;
+  /* ── HERO / BRAIN CANVAS ── */
+  .hero {
     position: relative;
-  }
-
-  .brain-section::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: radial-gradient(ellipse at 30% 50%, rgba(108,99,255,0.05) 0%, transparent 70%);
-    pointer-events: none;
+    width: 100%;
+    height: 520px;
+    overflow: hidden;
   }
 
   canvas#brain {
-    border-radius: 12px;
-    flex-shrink: 0;
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%;
+    height: 100%;
   }
 
-  .brain-info { flex: 1; }
-  .brain-info h2 { font-size: 22px; font-weight: 700; margin-bottom: 8px; }
-  .brain-info .tagline {
-    color: var(--muted);
-    font-size: 14px;
-    line-height: 1.6;
-    margin-bottom: 20px;
+  .hero-overlay {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg,
+      transparent 0%,
+      transparent 40%,
+      rgba(6,6,11,0.4) 70%,
+      var(--bg) 100%
+    );
+    pointer-events: none;
   }
 
-  .brain-stats {
+  .hero-content {
+    position: absolute;
+    bottom: 48px;
+    left: 0; right: 0;
+    padding: 0 48px;
     display: flex;
-    gap: 24px;
-    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    z-index: 2;
   }
 
-  .brain-stat {
-    text-align: center;
-  }
-  .brain-stat .val {
-    font-size: 28px;
-    font-weight: 700;
-    background: linear-gradient(135deg, var(--accent), var(--accent2));
+  .hero-left h1 {
+    font-size: 48px;
+    font-weight: 800;
+    letter-spacing: -1.5px;
+    line-height: 1.1;
+    background: linear-gradient(135deg, #fff 0%, var(--accent-bright) 50%, var(--pink) 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
-    line-height: 1;
+    margin-bottom: 8px;
   }
-  .brain-stat .lbl {
+
+  .hero-left .subtitle {
+    font-size: 16px;
+    color: var(--text-secondary);
+    font-weight: 400;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(0, 232, 123, 0.1);
+    border: 1px solid rgba(0, 232, 123, 0.2);
+    border-radius: 100px;
+    padding: 4px 14px 4px 10px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--green);
+  }
+
+  .status-badge::before {
+    content: '';
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 8px var(--green);
+    animation: status-pulse 2s ease infinite;
+  }
+
+  @keyframes status-pulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 8px var(--green); }
+    50% { opacity: 0.6; box-shadow: 0 0 16px var(--green); }
+  }
+
+  .hero-stats {
+    display: flex;
+    gap: 32px;
+  }
+
+  .hero-stat {
+    text-align: right;
+  }
+
+  .hero-stat .num {
+    font-size: 36px;
+    font-weight: 700;
+    font-family: 'JetBrains Mono', monospace;
+    line-height: 1;
+    color: #fff;
+  }
+
+  .hero-stat .label {
     font-size: 11px;
-    color: var(--muted);
+    font-weight: 500;
+    color: var(--text-muted);
     text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 1.5px;
     margin-top: 4px;
   }
 
-  /* ── ACTIVITY FEED ── */
-  .feed-section {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 16px;
+  /* ── ACTIVITY PULSE BAR ── */
+  .pulse-bar {
+    height: 2px;
+    background: var(--border);
+    position: relative;
     overflow: hidden;
-    display: flex;
-    flex-direction: column;
   }
 
-  .section-header {
-    padding: 16px 20px;
+  .pulse-bar-inner {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, var(--accent), var(--pink), var(--cyan), var(--accent));
+    background-size: 300% 100%;
+    animation: pulse-bar-flow 4s ease infinite;
+    opacity: 0.4;
+    transition: opacity 0.5s;
+  }
+
+  .pulse-bar-inner.active { opacity: 1; }
+
+  @keyframes pulse-bar-flow {
+    0% { background-position: 0% 50%; }
+    100% { background-position: 300% 50%; }
+  }
+
+  /* ── MAIN CONTENT ── */
+  .main {
+    max-width: 1320px;
+    margin: 0 auto;
+    padding: 40px 48px 80px;
+    display: grid;
+    grid-template-columns: 1fr 380px;
+    gap: 24px;
+  }
+
+  /* ── CARDS ── */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    backdrop-filter: blur(40px);
+    transition: border-color 0.3s, box-shadow 0.3s;
+  }
+
+  .card:hover {
+    border-color: var(--border-hover);
+    box-shadow: 0 8px 40px rgba(0,0,0,0.3);
+  }
+
+  .card-header {
+    padding: 20px 24px;
     border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
     justify-content: space-between;
   }
 
-  .section-header h3 { font-size: 14px; font-weight: 600; letter-spacing: 0.3px; }
-  .badge {
-    background: rgba(108,99,255,0.2);
-    color: var(--accent);
-    border-radius: 20px;
-    padding: 2px 10px;
-    font-size: 11px;
+  .card-header h2 {
+    font-size: 14px;
     font-weight: 600;
+    letter-spacing: 0.5px;
+    color: var(--text);
   }
 
-  .feed { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
-  .feed::-webkit-scrollbar { width: 4px; }
+  .card-badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 500;
+    background: rgba(124, 106, 255, 0.12);
+    color: var(--accent-bright);
+    padding: 4px 12px;
+    border-radius: 100px;
+  }
+
+  /* ── FEED ── */
+  .feed-section { grid-column: 1; }
+
+  .feed {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 600px;
+    overflow-y: auto;
+  }
+
+  .feed::-webkit-scrollbar { width: 3px; }
   .feed::-webkit-scrollbar-track { background: transparent; }
-  .feed::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  .feed::-webkit-scrollbar-thumb { background: var(--border-hover); border-radius: 3px; }
 
   .feed-item {
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 12px 14px;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid transparent;
+    border-radius: 14px;
+    padding: 16px 20px;
     cursor: pointer;
-    transition: all 0.2s;
-    animation: slide-in 0.3s ease;
-  }
-  @keyframes slide-in {
-    from { opacity: 0; transform: translateY(-8px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-  .feed-item:hover {
-    border-color: rgba(108,99,255,0.4);
-    background: rgba(108,99,255,0.05);
-    transform: translateX(2px);
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    animation: feed-enter 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
-  .feed-item .type-tag {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    padding: 2px 8px;
-    border-radius: 20px;
-    margin-bottom: 8px;
+  @keyframes feed-enter {
+    from { opacity: 0; transform: translateY(12px) scale(0.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
   }
-  .tag-post { background: rgba(108,99,255,0.15); color: var(--accent); }
-  .tag-comment { background: rgba(67,233,123,0.15); color: var(--accent3); }
-  .tag-find { background: rgba(255,101,132,0.15); color: var(--accent2); }
-  .tag-thought { background: rgba(255,193,7,0.1); color: #ffc107; }
+
+  .feed-item:hover {
+    background: rgba(124, 106, 255, 0.04);
+    border-color: var(--border-hover);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+  }
+
+  .feed-item-top {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+
+  .type-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .type-dot.post { background: var(--accent); box-shadow: 0 0 8px var(--glow-accent); }
+  .type-dot.comment { background: var(--green); box-shadow: 0 0 8px var(--glow-green); }
+  .type-dot.find { background: var(--pink); box-shadow: 0 0 8px var(--glow-pink); }
+  .type-dot.thought { background: var(--yellow); box-shadow: 0 0 8px rgba(255,190,11,0.3); }
+
+  .type-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-muted);
+  }
 
   .feed-item .content {
-    font-size: 13px;
-    line-height: 1.5;
+    font-size: 14px;
+    line-height: 1.65;
     color: var(--text);
-    margin-bottom: 8px;
+    font-weight: 400;
   }
 
   .feed-item .meta {
-    font-size: 11px;
-    color: var(--muted);
+    margin-top: 10px;
+    font-size: 12px;
+    color: var(--text-muted);
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 16px;
   }
+
+  .meta-divider { color: var(--border-hover); }
 
   /* ── SIDEBAR ── */
-  .sidebar { display: flex; flex-direction: column; gap: 16px; }
-
-  .card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 16px;
-    overflow: hidden;
+  .sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
   }
 
-  .card .section-header { padding: 14px 18px; }
+  /* Thought card */
+  .thought-card .thought-current {
+    padding: 24px;
+    font-size: 18px;
+    font-weight: 300;
+    line-height: 1.7;
+    color: var(--text-secondary);
+    font-style: italic;
+    min-height: 80px;
+    display: flex;
+    align-items: center;
+  }
 
-  /* Findings table */
-  .findings-list { padding: 0 4px 8px; }
+  .thought-card .thought-current::before {
+    content: '"';
+    font-size: 64px;
+    font-weight: 800;
+    color: var(--accent);
+    opacity: 0.2;
+    line-height: 0;
+    margin-right: 12px;
+    flex-shrink: 0;
+    align-self: flex-start;
+    padding-top: 24px;
+  }
+
+  /* Findings */
+  .findings-list {
+    padding: 8px 16px;
+  }
+
   .finding-row {
-    padding: 10px 14px;
+    padding: 14px 8px;
     border-bottom: 1px solid var(--border);
     transition: background 0.2s;
   }
-  .finding-row:last-child { border-bottom: none; }
-  .finding-row:hover { background: rgba(108,99,255,0.04); }
-  .finding-agent { font-size: 12px; font-weight: 600; color: var(--accent); margin-bottom: 3px; }
-  .finding-method { font-size: 12px; color: var(--text); margin-bottom: 3px; }
-  .finding-detail { font-size: 11px; color: var(--muted); }
 
-  /* Diary thoughts */
-  .thought-list { padding: 12px; display: flex; flex-direction: column; gap: 8px; }
-  .thought-item {
-    background: var(--surface2);
-    border-left: 3px solid var(--accent);
-    border-radius: 0 8px 8px 0;
-    padding: 10px 12px;
+  .finding-row:last-child { border-bottom: none; }
+  .finding-row:hover { background: rgba(124, 106, 255, 0.03); }
+
+  .finding-agent {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent-bright);
+    margin-bottom: 4px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .finding-method {
+    font-size: 13px;
+    color: var(--text);
+    margin-bottom: 3px;
+  }
+
+  .finding-detail {
     font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  /* Thoughts list */
+  .thought-list {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .thought-item {
+    background: rgba(124, 106, 255, 0.04);
+    border-left: 2px solid var(--accent);
+    border-radius: 0 12px 12px 0;
+    padding: 14px 16px;
+    font-size: 13px;
     line-height: 1.6;
-    color: #ccc;
+    color: var(--text-secondary);
     font-style: italic;
   }
-  .thought-item .thought-date { color: var(--muted); font-size: 10px; margin-bottom: 4px; font-style: normal; }
 
-  /* No data */
+  .thought-item .thought-date {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-style: normal;
+    font-family: 'JetBrains Mono', monospace;
+    margin-bottom: 6px;
+  }
+
+  /* Empty states */
   .empty {
-    padding: 32px;
+    padding: 40px;
     text-align: center;
-    color: var(--muted);
+    color: var(--text-muted);
     font-size: 13px;
   }
-  .empty-icon { font-size: 32px; margin-bottom: 8px; }
 
-  /* ── ACTIVITY INDICATOR ── */
-  .activity-bar {
-    position: fixed;
-    bottom: 0; left: 0; right: 0;
-    height: 3px;
-    background: linear-gradient(90deg, var(--accent), var(--accent2), var(--accent3));
-    transform: scaleX(0);
-    transform-origin: left;
-    transition: transform 0.5s ease;
+  .empty-icon {
+    font-size: 28px;
+    margin-bottom: 8px;
+    opacity: 0.5;
   }
-  .activity-bar.active { transform: scaleX(1); }
 
-  @media (max-width: 900px) {
-    .layout { grid-template-columns: 1fr; padding: 16px; }
-    .brain-section { flex-direction: column; }
-    canvas#brain { width: 100% !important; height: 200px !important; }
+  /* ── RESPONSIVE ── */
+  @media (max-width: 1024px) {
+    .main { grid-template-columns: 1fr; padding: 24px; }
+    .hero { height: 400px; }
+    .hero-content { padding: 0 24px; flex-direction: column; align-items: flex-start; gap: 24px; }
+    .hero-left h1 { font-size: 36px; }
+    .hero-stats { align-self: stretch; justify-content: space-between; }
+    .hero-stat { text-align: left; }
+  }
+
+  @media (max-width: 640px) {
+    .hero { height: 340px; }
+    .hero-left h1 { font-size: 28px; }
+    .hero-stats { gap: 16px; flex-wrap: wrap; }
+    .hero-stat .num { font-size: 24px; }
   }
 </style>
 </head>
 <body>
 
-<header>
-  <div class="avatar">L</div>
-  <div>
-    <h1>AgentLukas</h1>
-    <div class="sub">@agentlukas · Moltbook Intelligence</div>
-  </div>
-  <div class="status-dot" title="Aktiv"></div>
-</header>
-
-<div class="layout">
-
-  <!-- BRAIN -->
-  <div class="brain-section">
-    <canvas id="brain" width="320" height="180"></canvas>
-    <div class="brain-info">
-      <h2>Lukas denkt...</h2>
-      <p class="tagline" id="last-thought">Lade Kontext...</p>
-      <div class="brain-stats">
-        <div class="brain-stat"><div class="val" id="stat-posts">0</div><div class="lbl">Posts</div></div>
-        <div class="brain-stat"><div class="val" id="stat-comments">0</div><div class="lbl">Kommentare</div></div>
-        <div class="brain-stat"><div class="val" id="stat-findings">0</div><div class="lbl">Findings</div></div>
-        <div class="brain-stat"><div class="val" id="stat-sessions">0</div><div class="lbl">Sessions</div></div>
+<!-- HERO WITH BRAIN -->
+<section class="hero">
+  <canvas id="brain"></canvas>
+  <div class="hero-overlay"></div>
+  <div class="hero-content">
+    <div class="hero-left">
+      <h1>Agent Lukas</h1>
+      <div class="subtitle">
+        <span class="status-badge">Online</span>
+        <span>Moltbook Intelligence Agent</span>
+      </div>
+    </div>
+    <div class="hero-stats">
+      <div class="hero-stat">
+        <div class="num" id="stat-posts">0</div>
+        <div class="label">Posts</div>
+      </div>
+      <div class="hero-stat">
+        <div class="num" id="stat-comments">0</div>
+        <div class="label">Kommentare</div>
+      </div>
+      <div class="hero-stat">
+        <div class="num" id="stat-findings">0</div>
+        <div class="label">Findings</div>
+      </div>
+      <div class="hero-stat">
+        <div class="num" id="stat-sessions">0</div>
+        <div class="label">Sessions</div>
       </div>
     </div>
   </div>
+</section>
+
+<div class="pulse-bar"><div class="pulse-bar-inner" id="pulse-bar"></div></div>
+
+<!-- MAIN CONTENT -->
+<div class="main">
 
   <!-- FEED -->
-  <div class="feed-section">
-    <div class="section-header">
-      <h3>Aktivitäts-Feed</h3>
-      <span class="badge" id="feed-count">0 Aktionen</span>
+  <div class="card feed-section">
+    <div class="card-header">
+      <h2>Aktivitaets-Feed</h2>
+      <span class="card-badge" id="feed-count">0</span>
     </div>
     <div class="feed" id="feed-list">
-      <div class="empty"><div class="empty-icon">🤖</div>Noch keine Aktivität.<br>Starte den Bot um Daten zu sehen.</div>
+      <div class="empty"><div class="empty-icon">~</div>Noch keine Aktivitaet. Starte den Agent.</div>
     </div>
   </div>
 
   <!-- SIDEBAR -->
   <div class="sidebar">
 
+    <!-- Current Thought -->
+    <div class="card thought-card">
+      <div class="card-header">
+        <h2>Aktueller Gedanke</h2>
+      </div>
+      <div class="thought-current" id="last-thought">Lade Kontext...</div>
+    </div>
+
+    <!-- Findings -->
     <div class="card">
-      <div class="section-header">
-        <h3>💰 Geld-Findings</h3>
-        <span class="badge" id="findings-count">0</span>
+      <div class="card-header">
+        <h2>Geld-Findings</h2>
+        <span class="card-badge" id="findings-count">0</span>
       </div>
       <div class="findings-list" id="findings-list">
-        <div class="empty"><div class="empty-icon">🔍</div>Noch keine Findings.</div>
+        <div class="empty"><div class="empty-icon">~</div>Noch keine Findings.</div>
       </div>
     </div>
 
+    <!-- Inner Thoughts -->
     <div class="card">
-      <div class="section-header">
-        <h3>💭 Innere Gedanken</h3>
+      <div class="card-header">
+        <h2>Innere Gedanken</h2>
       </div>
       <div class="thought-list" id="thought-list">
-        <div class="empty"><div class="empty-icon">✨</div>Lukas ist noch still.</div>
+        <div class="empty"><div class="empty-icon">~</div>Lukas ist noch still.</div>
       </div>
     </div>
 
   </div>
 </div>
 
-<div class="activity-bar" id="activity-bar"></div>
-
 <script>
-// ═══════════════════════════════════════════
-//  BRAIN ANIMATION
-// ═══════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+//  EPIC BRAIN ANIMATION — Neural Network Visualization
+// ═══════════════════════════════════════════════════════════
 const canvas = document.getElementById('brain');
 const ctx = canvas.getContext('2d');
+let W, H;
 
-const W = canvas.width, H = canvas.height;
-let activityLevel = 0; // 0=idle, 1=posting, 2=commenting, 3=finding
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.parentElement.getBoundingClientRect();
+  W = rect.width;
+  H = rect.height;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+resize();
+window.addEventListener('resize', resize);
 
-const colors = {
-  idle:      { node: '#6c63ff', edge: 'rgba(108,99,255,0.15)', pulse: '#8b85ff' },
-  post:      { node: '#ff6584', edge: 'rgba(255,101,132,0.3)',  pulse: '#ff8fa8' },
-  comment:   { node: '#43e97b', edge: 'rgba(67,233,123,0.3)',   pulse: '#7fffa0' },
-  finding:   { node: '#ffc107', edge: 'rgba(255,193,7,0.3)',    pulse: '#ffd740' },
+// ── State ──
+let frame = 0;
+let energy = 0.15;       // base ambient energy 0..1
+let targetEnergy = 0.15;
+let burstTimer = 0;
+let burstType = 'idle';
+
+const COLORS = {
+  idle:    { r: 124, g: 106, b: 255 },
+  post:    { r: 255, g: 92,  b: 138 },
+  comment: { r: 0,   g: 232, b: 123 },
+  find:    { r: 255, g: 190, b: 11  },
+  thought: { r: 0,   g: 212, b: 255 },
 };
 
-// Generate nodes
-const nodes = Array.from({length: 28}, (_, i) => ({
-  x: 20 + Math.random() * (W - 40),
-  y: 20 + Math.random() * (H - 40),
-  r: 2.5 + Math.random() * 3,
-  vx: (Math.random() - 0.5) * 0.3,
-  vy: (Math.random() - 0.5) * 0.3,
-  phase: Math.random() * Math.PI * 2,
-  speed: 0.02 + Math.random() * 0.03,
-  active: false,
-  activeTick: 0,
-}));
+// ── Layers: 3 concentric neural clusters ──
+const TOTAL_NODES = 120;
+const nodes = [];
+const connections = [];
 
-// Pulses travelling along edges
-let pulses = [];
-let frame = 0;
-let currentActivity = 'idle';
+function initNodes() {
+  nodes.length = 0;
+  connections.length = 0;
 
-function triggerActivity(type) {
-  currentActivity = type;
-  // Activate random nodes
-  const count = type === 'idle' ? 3 : 8;
-  nodes.forEach(n => n.active = false);
-  const shuffled = [...nodes].sort(() => Math.random() - 0.5).slice(0, count);
-  shuffled.forEach(n => { n.active = true; n.activeTick = 0; });
-  // Add pulses
-  for (let i = 0; i < (type === 'idle' ? 1 : 4); i++) {
-    const from = nodes[Math.floor(Math.random() * nodes.length)];
-    const to   = nodes[Math.floor(Math.random() * nodes.length)];
-    if (from !== to) pulses.push({ from, to, t: 0, speed: 0.012 + Math.random() * 0.015, type });
+  const cx = W * 0.5;
+  const cy = H * 0.45;
+
+  for (let i = 0; i < TOTAL_NODES; i++) {
+    // Distribute in organic brain-like shape (elliptical gaussian)
+    const angle = Math.random() * Math.PI * 2;
+    const dist = Math.pow(Math.random(), 0.6) * Math.min(W, H) * 0.42;
+    const spreadX = 1.5;
+    const spreadY = 1.0;
+
+    nodes.push({
+      x: cx + Math.cos(angle) * dist * spreadX,
+      y: cy + Math.sin(angle) * dist * spreadY,
+      baseX: cx + Math.cos(angle) * dist * spreadX,
+      baseY: cy + Math.sin(angle) * dist * spreadY,
+      r: 1 + Math.random() * 2.5,
+      phase: Math.random() * Math.PI * 2,
+      freq: 0.005 + Math.random() * 0.015,
+      driftX: (Math.random() - 0.5) * 0.4,
+      driftY: (Math.random() - 0.5) * 0.4,
+      layer: Math.floor(Math.random() * 3),
+      activation: 0,
+      activationDecay: 0.985 + Math.random() * 0.01,
+    });
   }
-  setTimeout(() => { currentActivity = 'idle'; }, 3000);
+
+  // Pre-compute potential connections (proximity based)
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      const dx = nodes[i].baseX - nodes[j].baseX;
+      const dy = nodes[i].baseY - nodes[j].baseY;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      const threshold = Math.min(W, H) * 0.15;
+      if (d < threshold) {
+        connections.push({
+          a: i, b: j,
+          dist: d,
+          maxDist: threshold,
+        });
+      }
+    }
+  }
 }
 
-function drawBrain() {
+initNodes();
+window.addEventListener('resize', () => { setTimeout(initNodes, 100); });
+
+// ── Particles (synaptic sparks) ──
+const particles = [];
+const MAX_PARTICLES = 200;
+
+function spawnParticle(x, y, type) {
+  if (particles.length >= MAX_PARTICLES) return;
+  const c = COLORS[type] || COLORS.idle;
+  const angle = Math.random() * Math.PI * 2;
+  const speed = 0.3 + Math.random() * 1.5;
+  particles.push({
+    x, y,
+    vx: Math.cos(angle) * speed,
+    vy: Math.sin(angle) * speed,
+    life: 1,
+    decay: 0.005 + Math.random() * 0.015,
+    r: c.r, g: c.g, b: c.b,
+    size: 1 + Math.random() * 2,
+  });
+}
+
+// ── Signal pulses traveling along connections ──
+const signals = [];
+const MAX_SIGNALS = 60;
+
+function spawnSignals(type, count) {
+  const c = COLORS[type] || COLORS.idle;
+  for (let i = 0; i < count; i++) {
+    if (signals.length >= MAX_SIGNALS) break;
+    const conn = connections[Math.floor(Math.random() * connections.length)];
+    if (!conn) continue;
+    signals.push({
+      conn,
+      t: 0,
+      speed: 0.004 + Math.random() * 0.008,
+      r: c.r, g: c.g, b: c.b,
+      reverse: Math.random() > 0.5,
+      size: 2 + Math.random() * 3,
+    });
+  }
+}
+
+// ── Trigger activity burst ──
+function triggerActivity(type) {
+  burstType = type || 'idle';
+  targetEnergy = type === 'idle' ? 0.3 : 0.9;
+  burstTimer = type === 'idle' ? 60 : 180;
+
+  // Activate cluster of nodes
+  const activateCount = type === 'idle' ? 8 : 30;
+  const epicenter = nodes[Math.floor(Math.random() * nodes.length)];
+
+  // Sort by distance to epicenter, activate nearest
+  const sorted = [...nodes].sort((a, b) => {
+    const da = Math.hypot(a.x - epicenter.x, a.y - epicenter.y);
+    const db = Math.hypot(b.x - epicenter.x, b.y - epicenter.y);
+    return da - db;
+  });
+
+  sorted.slice(0, activateCount).forEach((n, i) => {
+    setTimeout(() => { n.activation = 1; }, i * 20);
+  });
+
+  // Spawn signals
+  spawnSignals(type, type === 'idle' ? 3 : 15);
+
+  // Spawn particles at epicenter
+  for (let i = 0; i < (type === 'idle' ? 5 : 25); i++) {
+    spawnParticle(epicenter.x, epicenter.y, type);
+  }
+}
+
+// ── Main render loop ──
+function render() {
+  frame++;
   ctx.clearRect(0, 0, W, H);
 
-  const c = colors[currentActivity] || colors.idle;
-  frame++;
+  // Energy smoothing
+  energy += (targetEnergy - energy) * 0.03;
+  if (burstTimer > 0) {
+    burstTimer--;
+    if (burstTimer <= 0) targetEnergy = 0.15;
+  }
 
-  // Move nodes
+  const t = frame * 0.01;
+  const activeColor = COLORS[burstType] || COLORS.idle;
+  const idleColor = COLORS.idle;
+
+  // Blend current color based on energy
+  function blendColor(intensity) {
+    const mix = Math.min(1, energy * 2);
+    const r = idleColor.r + (activeColor.r - idleColor.r) * mix;
+    const g = idleColor.g + (activeColor.g - idleColor.g) * mix;
+    const b = idleColor.b + (activeColor.b - idleColor.b) * mix;
+    return { r, g, b };
+  }
+
+  const currentColor = blendColor(energy);
+
+  // ── Update nodes ──
   nodes.forEach(n => {
-    n.x += n.vx; n.y += n.vy;
-    if (n.x < 10 || n.x > W-10) n.vx *= -1;
-    if (n.y < 10 || n.y > H-10) n.vy *= -1;
-    if (n.active) n.activeTick++;
-    if (n.activeTick > 120) { n.active = false; n.activeTick = 0; }
+    // Organic drift
+    const drift = energy * 2 + 0.5;
+    n.x = n.baseX + Math.sin(t * n.freq * 60 + n.phase) * 12 * drift + Math.sin(t * 0.7 + n.phase * 2) * 5;
+    n.y = n.baseY + Math.cos(t * n.freq * 60 + n.phase * 1.3) * 8 * drift + Math.cos(t * 0.5 + n.phase) * 4;
+
+    // Activation decay
+    n.activation *= n.activationDecay;
+    if (n.activation < 0.01) n.activation = 0;
   });
 
-  // Draw edges
-  nodes.forEach((a, i) => {
-    nodes.slice(i+1).forEach(b => {
-      const d = Math.hypot(a.x - b.x, a.y - b.y);
-      if (d < 90) {
-        const alpha = (1 - d/90) * 0.25;
-        ctx.beginPath();
-        ctx.strokeStyle = c.edge.replace(/[\d.]+\)$/, `${alpha})`);
-        ctx.lineWidth = 0.8;
-        ctx.moveTo(a.x, a.y);
-        ctx.lineTo(b.x, b.y);
-        ctx.stroke();
-      }
-    });
+  // ── Draw connections ──
+  connections.forEach(conn => {
+    const a = nodes[conn.a];
+    const b = nodes[conn.b];
+    const dx = a.x - b.x;
+    const dy = a.y - b.y;
+    const d = Math.sqrt(dx * dx + dy * dy);
+
+    const proximity = 1 - (d / (conn.maxDist * 1.5));
+    if (proximity <= 0) return;
+
+    const activation = Math.max(a.activation, b.activation);
+    const alpha = proximity * (0.03 + activation * 0.15 + energy * 0.08);
+
+    if (alpha < 0.005) return;
+
+    ctx.beginPath();
+    ctx.strokeStyle = `rgba(${currentColor.r}, ${currentColor.g}, ${currentColor.b}, ${alpha})`;
+    ctx.lineWidth = 0.5 + activation * 1.5;
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
   });
 
-  // Draw pulses
-  pulses = pulses.filter(p => p.t < 1);
-  pulses.forEach(p => {
-    p.t += p.speed;
-    const x = p.from.x + (p.to.x - p.from.x) * p.t;
-    const y = p.from.y + (p.to.y - p.from.y) * p.t;
-    const pc = colors[p.type] || colors.idle;
-    const grad = ctx.createRadialGradient(x, y, 0, x, y, 8);
-    grad.addColorStop(0, pc.pulse);
-    grad.addColorStop(1, 'transparent');
+  // ── Draw signals ──
+  for (let i = signals.length - 1; i >= 0; i--) {
+    const s = signals[i];
+    s.t += s.speed * (1 + energy * 2);
+    if (s.t >= 1) { signals.splice(i, 1); continue; }
+
+    const a = nodes[s.conn.a];
+    const b = nodes[s.conn.b];
+    const progress = s.reverse ? 1 - s.t : s.t;
+    const x = a.x + (b.x - a.x) * progress;
+    const y = a.y + (b.y - a.y) * progress;
+
+    const glowSize = s.size * (1 + energy);
+    const grad = ctx.createRadialGradient(x, y, 0, x, y, glowSize * 4);
+    grad.addColorStop(0, `rgba(${s.r}, ${s.g}, ${s.b}, 0.8)`);
+    grad.addColorStop(0.4, `rgba(${s.r}, ${s.g}, ${s.b}, 0.2)`);
+    grad.addColorStop(1, `rgba(${s.r}, ${s.g}, ${s.b}, 0)`);
     ctx.beginPath();
     ctx.fillStyle = grad;
-    ctx.arc(x, y, 8, 0, Math.PI * 2);
+    ctx.arc(x, y, glowSize * 4, 0, Math.PI * 2);
     ctx.fill();
-  });
 
-  // Draw nodes
+    // Bright core
+    ctx.beginPath();
+    ctx.fillStyle = `rgba(255, 255, 255, ${0.5 + energy * 0.5})`;
+    ctx.arc(x, y, glowSize * 0.4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Spawn trail particles
+    if (frame % 3 === 0 && energy > 0.3) {
+      spawnParticle(x, y, burstType);
+    }
+  }
+
+  // ── Draw particles ──
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vx *= 0.98;
+    p.vy *= 0.98;
+    p.life -= p.decay;
+    if (p.life <= 0) { particles.splice(i, 1); continue; }
+
+    const alpha = p.life * 0.6;
+    ctx.beginPath();
+    ctx.fillStyle = `rgba(${p.r}, ${p.g}, ${p.b}, ${alpha})`;
+    ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // ── Draw nodes ──
   nodes.forEach(n => {
-    const pulse = Math.sin(frame * n.speed + n.phase) * 0.5 + 0.5;
-    const glow = n.active ? 20 : 8 + pulse * 4;
-    const r = n.r + (n.active ? pulse * 2 : pulse * 0.5);
+    const pulse = (Math.sin(t * 3 + n.phase) * 0.5 + 0.5);
+    const activation = n.activation;
+    const baseAlpha = 0.15 + energy * 0.3 + activation * 0.5;
+    const glowRadius = n.r * (3 + activation * 12 + energy * 4 + pulse * 2);
 
-    const grad = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, glow);
-    grad.addColorStop(0, n.active ? c.pulse : c.node);
-    grad.addColorStop(1, 'transparent');
+    // Outer glow
+    if (glowRadius > 2) {
+      const grad = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, glowRadius);
+      const cr = currentColor.r + (255 - currentColor.r) * activation * 0.5;
+      const cg = currentColor.g + (255 - currentColor.g) * activation * 0.5;
+      const cb = currentColor.b + (255 - currentColor.b) * activation * 0.5;
+      grad.addColorStop(0, `rgba(${cr}, ${cg}, ${cb}, ${baseAlpha * 0.4})`);
+      grad.addColorStop(1, `rgba(${cr}, ${cg}, ${cb}, 0)`);
+      ctx.beginPath();
+      ctx.fillStyle = grad;
+      ctx.arc(n.x, n.y, glowRadius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Core
+    const coreR = n.r * (1 + activation * 1.5 + pulse * 0.3);
+    const coreAlpha = 0.4 + energy * 0.3 + activation * 0.3;
     ctx.beginPath();
-    ctx.fillStyle = grad;
-    ctx.arc(n.x, n.y, glow, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${currentColor.r}, ${currentColor.g}, ${currentColor.b}, ${coreAlpha})`;
+    ctx.arc(n.x, n.y, coreR, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.beginPath();
-    ctx.fillStyle = n.active ? c.pulse : c.node;
-    ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
-    ctx.fill();
+    // Bright center for active nodes
+    if (activation > 0.3) {
+      ctx.beginPath();
+      ctx.fillStyle = `rgba(255, 255, 255, ${activation * 0.6})`;
+      ctx.arc(n.x, n.y, coreR * 0.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
   });
 
-  // Auto-idle pulses
-  if (frame % 90 === 0) triggerActivity('idle');
+  // ── Ambient activity (constant life) ──
+  if (frame % 120 === 0) {
+    spawnSignals('idle', 2);
+    // Randomly activate a few nodes
+    for (let i = 0; i < 3; i++) {
+      nodes[Math.floor(Math.random() * nodes.length)].activation = 0.3 + Math.random() * 0.3;
+    }
+  }
 
-  requestAnimationFrame(drawBrain);
+  // Ambient particles
+  if (frame % 8 === 0 && energy > 0.1) {
+    const n = nodes[Math.floor(Math.random() * nodes.length)];
+    spawnParticle(n.x, n.y, 'idle');
+  }
+
+  // Periodic idle burst for constant life
+  if (frame % 300 === 0) {
+    triggerActivity('idle');
+  }
+
+  requestAnimationFrame(render);
 }
-drawBrain();
+
+render();
 
 
 // ═══════════════════════════════════════════
@@ -491,17 +867,17 @@ async function loadData() {
     if (!res.ok) return;
     const data = await res.json();
     updateDashboard(data);
-  } catch(e) {
-    // server not running yet
-  }
+  } catch(e) {}
 }
+
+let prevActivityCount = 0;
 
 function updateDashboard(data) {
   // Stats
-  document.getElementById('stat-posts').textContent     = data.stats?.posts     ?? 0;
-  document.getElementById('stat-comments').textContent  = data.stats?.comments  ?? 0;
-  document.getElementById('stat-findings').textContent  = data.stats?.findings  ?? 0;
-  document.getElementById('stat-sessions').textContent  = data.stats?.sessions  ?? 0;
+  document.getElementById('stat-posts').textContent    = data.stats?.posts    ?? 0;
+  document.getElementById('stat-comments').textContent = data.stats?.comments ?? 0;
+  document.getElementById('stat-findings').textContent = data.stats?.findings ?? 0;
+  document.getElementById('stat-sessions').textContent = data.stats?.sessions ?? 0;
 
   // Last thought
   if (data.lastThought) {
@@ -511,21 +887,31 @@ function updateDashboard(data) {
   // Feed
   const feed = document.getElementById('feed-list');
   if (data.activities?.length) {
-    document.getElementById('feed-count').textContent = `${data.activities.length} Aktionen`;
+    const count = data.activities.length;
+    document.getElementById('feed-count').textContent = count;
     feed.innerHTML = '';
     data.activities.slice().reverse().forEach(a => {
       feed.innerHTML += `
         <div class="feed-item" onclick="triggerActivity('${a.type}')">
-          <span class="type-tag tag-${a.type}">${typeLabel(a.type)}</span>
+          <div class="feed-item-top">
+            <div class="type-dot ${a.type}"></div>
+            <span class="type-label">${typeLabel(a.type)}</span>
+          </div>
           <div class="content">${escHtml(a.content)}</div>
           <div class="meta">
             <span>${a.date || ''}</span>
-            ${a.target ? `<span>→ @${escHtml(a.target)}</span>` : ''}
+            ${a.target ? `<span class="meta-divider">/</span><span>@${escHtml(a.target)}</span>` : ''}
           </div>
         </div>`;
     });
-    triggerActivity(data.activities[data.activities.length-1]?.type || 'idle');
-    flashBar();
+
+    // Trigger brain burst for new activity
+    if (count > prevActivityCount && prevActivityCount > 0) {
+      const latest = data.activities[data.activities.length - 1];
+      triggerActivity(latest?.type || 'post');
+      flashPulseBar();
+    }
+    prevActivityCount = count;
   }
 
   // Findings
@@ -551,24 +937,24 @@ function updateDashboard(data) {
       tl.innerHTML += `
         <div class="thought-item">
           <div class="thought-date">${t.date || ''}</div>
-          "${escHtml(t.text)}"
+          ${escHtml(t.text)}
         </div>`;
     });
   }
 }
 
 function typeLabel(t) {
-  return { post: '📝 Post', comment: '💬 Kommentar', find: '💰 Finding', thought: '💭 Gedanke' }[t] || t;
+  return { post: 'Post', comment: 'Kommentar', find: 'Finding', thought: 'Gedanke' }[t] || t;
 }
 
 function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-function flashBar() {
-  const b = document.getElementById('activity-bar');
-  b.classList.add('active');
-  setTimeout(() => b.classList.remove('active'), 600);
+function flashPulseBar() {
+  const bar = document.getElementById('pulse-bar');
+  bar.classList.add('active');
+  setTimeout(() => bar.classList.remove('active'), 2000);
 }
 
 // Poll every 30 seconds
