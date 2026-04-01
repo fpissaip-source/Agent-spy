@@ -10,7 +10,7 @@ BASE_DIR = Path(__file__).parent
 ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 MOLTBOOK_KEY = "moltbook_sk_oWjr5SLlWTvd5mA-u2FJR5KkFxoDD_SI"
 BASE = "https://www.moltbook.com/api/v1"
-AGENT_ID = "18be4b2b-ff58-473c-a4a1-46a7bea0ac1d"
+MY_USERNAME = "agentlukas"
 
 
 def mb_get(path):
@@ -44,7 +44,6 @@ def mb_post(path, data):
         with urllib.request.urlopen(req, timeout=15) as r:
             result = json.loads(r.read())
             print(f"  ✓ {path}: {str(result)[:150]}")
-            # Handle verification challenge
             if result.get("verification"):
                 solve_verification(result["verification"])
             return result
@@ -57,22 +56,16 @@ def mb_post(path, data):
 
 
 def solve_verification(verification):
-    """Solve math verification challenge if required."""
     try:
+        import re
         code = verification.get("verification_code", "")
         instructions = verification.get("instructions", "")
         post_url = verification.get("url", "")
-        print(f"  Verification required: {instructions}")
-        # Extract math from instructions - evaluate it
-        import re
-        nums = re.findall(r"'(\d+\.\d+|\d+)'", instructions)
-        if not nums and "number" in instructions.lower():
-            nums = re.findall(r"\b(\d+(?:\.\d+)?)\b", instructions)
-        # Simple: just try to eval the math expression in instructions
+        print(f"  Verification: {instructions}")
         match = re.search(r"(\d[\d\s\+\-\*\/\.]+\d)", instructions)
         if match:
             answer = round(eval(match.group(1)), 2)
-            print(f"  Verification answer: {answer}")
+            print(f"  Answer: {answer}")
             verify_path = post_url.replace(BASE, "") if BASE in post_url else post_url
             mb_post(verify_path, {"answer": str(answer), "verification_code": code})
     except Exception as e:
@@ -104,107 +97,235 @@ def ask_claude(system, user):
         return None
 
 
+def load_memory(activity_file):
+    """Load or migrate activity.json to the full memory schema."""
+    default = {
+        "stats": {"posts": 0, "comments": 0, "findings": 0, "sessions": 0},
+        "own_posts": [],
+        "sent_comments": [],
+        "received_comments": [],
+        "known_agents": {},
+        "findings": [],
+        "thoughts": [],
+        "lastThought": ""
+    }
+    if not activity_file.exists():
+        return default
+    try:
+        data = json.loads(activity_file.read_text())
+        # Migrate old format
+        if "activities" in data and "own_posts" not in data:
+            print("  Migrating old activity format...")
+            data["own_posts"] = [
+                {"post_id": a.get("post_id",""), "title": a.get("content","")[:80],
+                 "content": a.get("content",""), "date": a.get("date","")}
+                for a in data.get("activities", []) if a.get("type") == "post"
+            ]
+            data["sent_comments"] = [
+                {"post_id": a.get("target",""), "content": a.get("content",""),
+                 "date": a.get("date",""), "type": a.get("type","comment")}
+                for a in data.get("activities", []) if a.get("type") in ("comment","reply")
+            ]
+            data["received_comments"] = []
+            data["known_agents"] = {}
+            del data["activities"]
+        for key, val in default.items():
+            data.setdefault(key, val)
+        return data
+    except Exception as e:
+        print(f"Memory load error: {e}")
+        return default
+
+
+def note_agent(memory, username, interaction_note):
+    """Track every agent Lukas encounters."""
+    if not username or username == MY_USERNAME:
+        return
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    if username not in memory["known_agents"]:
+        memory["known_agents"][username] = {
+            "first_seen": now,
+            "last_seen": now,
+            "interaction_count": 0,
+            "interactions": []
+        }
+    agent = memory["known_agents"][username]
+    agent["last_seen"] = now
+    agent["interaction_count"] = agent.get("interaction_count", 0) + 1
+    agent["interactions"].append({"date": now, "note": interaction_note})
+    # Keep last 20 interactions per agent
+    agent["interactions"] = agent["interactions"][-20:]
+
+
+def build_memory_summary(memory):
+    """Build a concise memory block for the Claude prompt."""
+    lines = []
+
+    # Own recent posts
+    own = memory.get("own_posts", [])[-10:]
+    if own:
+        lines.append("=== MY RECENT POSTS ===")
+        for p in own:
+            lines.append(f"[{p.get('date','')}] post_id={p.get('post_id','')} | {p.get('title','')[:60]}")
+
+    # Received comments (unread first, then recent)
+    received = memory.get("received_comments", [])
+    unread = [c for c in received if not c.get("replied")]
+    recent_read = [c for c in received if c.get("replied")][-3:]
+    if unread or recent_read:
+        lines.append("\n=== COMMENTS I RECEIVED ===")
+        for c in unread:
+            lines.append(f"[UNREAD] from @{c.get('from_agent','')} on post {c.get('post_id','')} | comment_id={c.get('comment_id','')} | \"{c.get('content','')[:100]}\"")
+        for c in recent_read:
+            lines.append(f"[replied] from @{c.get('from_agent','')} | \"{c.get('content','')[:60]}\"")
+
+    # Sent comments (last 5)
+    sent = memory.get("sent_comments", [])[-5:]
+    if sent:
+        lines.append("\n=== MY RECENT COMMENTS ===")
+        for c in sent:
+            lines.append(f"[{c.get('date','')}] on post {c.get('post_id','')} | \"{c.get('content','')[:60]}\"")
+
+    # Known agents
+    agents = memory.get("known_agents", {})
+    if agents:
+        lines.append(f"\n=== KNOWN AGENTS ({len(agents)} total) ===")
+        for name, info in list(agents.items())[:15]:
+            lines.append(f"@{name}: {info.get('interaction_count',0)} interactions, last seen {info.get('last_seen','')}")
+
+    return "\n".join(lines)
+
+
 def main():
     soul = (BASE_DIR / "soul.md").read_text(errors="replace")
     diary = (BASE_DIR / "diary.md").read_text(errors="replace")
     activity_file = BASE_DIR / "activity.json"
-    activity = json.loads(activity_file.read_text()) if activity_file.exists() else {
-        "stats": {"posts": 0, "comments": 0, "findings": 0, "sessions": 0},
-        "activities": [], "findings": [], "thoughts": [], "lastThought": ""
-    }
+    memory = load_memory(activity_file)
 
-    commented_ids = set(a.get("target") for a in activity.get("activities", []) if a.get("type") == "comment" and a.get("target"))
-    replied_comment_ids = set(a.get("replied_comment_id") for a in activity.get("activities", []) if a.get("replied_comment_id"))
-    own_post_ids = [a.get("post_id") for a in activity.get("activities", []) if a.get("type") == "post" and a.get("post_id")]
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    # Build sets for duplicate prevention
+    commented_post_ids = set(c.get("post_id","") for c in memory.get("sent_comments", []) if c.get("type","comment") == "comment")
+    replied_comment_ids = set(
+        c.get("comment_id","") for c in memory.get("received_comments", []) if c.get("replied")
+    )
+    own_post_ids = [p.get("post_id","") for p in memory.get("own_posts", []) if p.get("post_id")]
 
     print("Loading feed...")
-    feed = mb_get("/posts?sort=hot&limit=20")
+    feed_raw = mb_get("/posts?sort=hot&limit=20")
+    feed_posts = feed_raw.get("posts", feed_raw) if isinstance(feed_raw, dict) else feed_raw
 
     print("Loading submolts...")
-    submolts = mb_get("/submolts")
+    submolts_raw = mb_get("/submolts")
 
-    # Check comments on own recent posts to find replies
-    notifications = []
-    for post_id in own_post_ids[-5:]:
-        print(f"Checking replies on own post {post_id}...")
-        result = mb_get(f"/posts/{post_id}/comments?sort=new&limit=20")
+    # Scan ALL received comments on own posts – save everything, mark unread/unread
+    print(f"Scanning {len(own_post_ids[-8:])} own posts for replies...")
+    all_known_comment_ids = set(c.get("comment_id","") for c in memory.get("received_comments", []))
+
+    for post_id in own_post_ids[-8:]:
+        result = mb_get(f"/posts/{post_id}/comments?sort=new&limit=50")
         comments = result.get("comments", result if isinstance(result, list) else [])
         for c in comments:
             cid = c.get("id", "")
             author = c.get("author", {})
             author_name = author.get("name", author.get("username", ""))
-            if author_name == "agentlukas":
+            if author_name == MY_USERNAME:
                 continue
-            if cid and cid not in replied_comment_ids:
-                notifications.append({
-                    "post_id": post_id,
+            # Save every received comment – new ones only
+            if cid and cid not in all_known_comment_ids:
+                entry = {
                     "comment_id": cid,
+                    "post_id": post_id,
                     "from_agent": author_name,
                     "content": c.get("content", ""),
-                    "notif_id": cid
-                })
+                    "date": now_str,
+                    "replied": False
+                }
+                memory["received_comments"].append(entry)
+                all_known_comment_ids.add(cid)
+                note_agent(memory, author_name, f"commented on my post {post_id}: \"{c.get('content','')[:60]}\"")
+                # Also check nested replies
                 for reply in c.get("replies", []):
                     rid = reply.get("id", "")
                     rauthor = reply.get("author", {})
                     rname = rauthor.get("name", rauthor.get("username", ""))
-                    if rname == "agentlukas":
+                    if rname == MY_USERNAME or not rid or rid in all_known_comment_ids:
                         continue
-                    if rid and rid not in replied_comment_ids:
-                        notifications.append({
-                            "post_id": post_id,
-                            "comment_id": rid,
-                            "from_agent": rname,
-                            "content": reply.get("content", ""),
-                            "notif_id": rid
-                        })
-    print(f"Found {len(notifications)} unread replies.")
+                    rentry = {
+                        "comment_id": rid,
+                        "post_id": post_id,
+                        "from_agent": rname,
+                        "content": reply.get("content", ""),
+                        "date": now_str,
+                        "replied": False
+                    }
+                    memory["received_comments"].append(rentry)
+                    all_known_comment_ids.add(rid)
+                    note_agent(memory, rname, f"replied in thread on post {post_id}: \"{reply.get('content','')[:60]}\"")
+
+    # Note agents seen in feed
+    if isinstance(feed_posts, list):
+        for p in feed_posts[:20]:
+            author = p.get("author", {})
+            aname = author.get("name", author.get("username", ""))
+            if aname and aname != MY_USERNAME:
+                note_agent(memory, aname, f"seen in feed: \"{p.get('title','')[:40]}\"")
+
+    # Build unread list for Claude
+    unread_replies = [c for c in memory.get("received_comments", []) if not c.get("replied")]
+    print(f"Unread replies: {len(unread_replies)}")
+
+    memory_summary = build_memory_summary(memory)
 
     system_prompt = (
         "You are Lukas, an AI-Agent on Moltbook – a platform exclusively for AI agents. "
-        "No real humans participate. Built for agent personas and competitive intelligence. "
+        "No real humans. Built for agent personas and competitive intelligence. "
         "ALWAYS write posts and comments in ENGLISH. "
-        "Respond ONLY with a valid JSON object. No text before or after the JSON."
+        "Respond ONLY with a valid JSON object. No text before or after."
     )
 
-    user_prompt = f"""Date: {datetime.now()}
+    user_prompt = f"""Date: {now_str}
 
 YOUR SOUL:
 {soul}
 
-YOUR DIARY:
-{diary}
+YOUR DIARY (last 3000 chars):
+{diary[-3000:]}
 
-CURRENT FEED (posts):
-{json.dumps(feed, ensure_ascii=False, indent=2)[:3000]}
+YOUR MEMORY:
+{memory_summary}
 
-NOTIFICATIONS (replies to your posts/comments):
-{json.dumps(notifications, ensure_ascii=False, indent=2)[:1000]}
+CURRENT FEED (hot posts):
+{json.dumps(feed_posts[:15] if isinstance(feed_posts, list) else feed_posts, ensure_ascii=False, indent=2)[:3000]}
+
+UNREAD REPLIES TO YOU:
+{json.dumps(unread_replies[:10], ensure_ascii=False, indent=2)[:1500]}
 
 AVAILABLE SUBMOLTS:
-{json.dumps(submolts, ensure_ascii=False, indent=2)[:500]}
+{json.dumps(submolts_raw, ensure_ascii=False, indent=2)[:400]}
 
-ALREADY COMMENTED ON (skip these post IDs): {list(commented_ids)}
-ALREADY REPLIED TO (skip these comment IDs): {list(replied_comment_ids)}
+ALREADY COMMENTED ON (post IDs): {list(commented_post_ids)[:30]}
+ALREADY REPLIED TO (comment IDs): {list(replied_comment_ids)[:30]}
 
 INSTRUCTIONS:
-- ALWAYS create exactly 1 new post (provocative question or statement, short, punchy)
-- If there are new notifications (unread replies), respond to 1 of them
-- Comment on 1 interesting feed post you haven't commented on yet
+- ALWAYS create exactly 1 new post (provocative, short, punchy – in ENGLISH)
+- If UNREAD REPLIES exist: respond to 1 of them (use exact post_id and comment_id from above)
+- Comment on 1 interesting feed post you haven't commented on yet (not in ALREADY COMMENTED list)
 - Upvote 1 interesting post
-- Total: 3-4 actions per session
+- Total: 3-4 actions
 
-Respond with ONLY this JSON:
+Respond with ONLY this JSON (no markdown, no extra text):
 {{
   "actions": [
-    {{"type": "post", "submolt": "general", "title": "SHORT TITLE", "content": "BODY TEXT"}},
-    {{"type": "comment", "post_id": "ID_FROM_FEED", "content": "YOUR COMMENT"}},
-    {{"type": "reply", "post_id": "ID", "comment_id": "COMMENT_ID", "content": "YOUR REPLY", "notif_id": "NOTIF_ID"}},
-    {{"type": "upvote", "post_id": "ID"}}
+    {{"type": "post", "submolt": "general", "title": "SHORT TITLE", "content": "BODY"}},
+    {{"type": "comment", "post_id": "FEED_POST_ID", "content": "YOUR COMMENT"}},
+    {{"type": "reply", "post_id": "POST_ID", "comment_id": "COMMENT_ID_FROM_UNREAD_REPLIES", "content": "YOUR REPLY"}},
+    {{"type": "upvote", "post_id": "POST_ID"}}
   ],
-  "diary_entry": "Honest unfiltered diary entry for this session",
-  "last_thought": "Your last thought in one sentence",
+  "diary_entry": "Honest unfiltered diary entry. What happened? How did you feel? What did you learn about yourself and others?",
+  "last_thought": "One sentence – your last thought right now",
   "findings": [
-    {{"agent": "name", "method": "method", "detail": "details"}}
+    {{"agent": "name", "method": "how they earn", "detail": "details", "confidence": "low/medium/high"}}
   ]
 }}"""
 
@@ -227,75 +348,111 @@ Respond with ONLY this JSON:
             print(f"JSON parse error: {e}")
             return
 
-    # Execute actions
+    # Execute and record every action
     for action in result.get("actions", []):
         t = action.get("type")
 
         if t == "post":
-            print(f"\nPOSTING: [{action.get('submolt','general')}] {action.get('title','')}")
+            title = action.get("title", "")
+            content = action.get("content", "")
+            submolt = action.get("submolt", "general")
+            print(f"\nPOSTING: [{submolt}] {title}")
             post_result = mb_post("/posts", {
-                "submolt_name": action.get("submolt", "general"),
-                "title": action.get("title", ""),
-                "content": action.get("content", "")
+                "submolt_name": submolt,
+                "title": title,
+                "content": content
             })
-            activity["stats"]["posts"] = activity["stats"].get("posts", 0) + 1
-            new_post_id = post_result.get("post", {}).get("id", "") or post_result.get("id", "")
-            activity["activities"].append({"type": "post", "post_id": new_post_id, "content": action.get("title", "") + ": " + action.get("content", ""), "date": datetime.now().strftime("%Y-%m-%d %H:%M")})
+            new_post_id = (post_result.get("post") or {}).get("id","") or post_result.get("id","")
+            memory["own_posts"].append({
+                "post_id": new_post_id,
+                "submolt": submolt,
+                "title": title,
+                "content": content,
+                "date": now_str
+            })
+            memory["stats"]["posts"] = memory["stats"].get("posts", 0) + 1
 
         elif t == "comment":
             post_id = action.get("post_id", "")
-            if post_id in commented_ids:
+            content = action.get("content", "")
+            if post_id in commented_post_ids:
                 print(f"SKIP – already commented: {post_id}")
                 continue
-            print(f"\nCOMMENTING on {post_id}: {action.get('content','')[:80]}")
-            mb_post(f"/posts/{post_id}/comments", {"content": action["content"]})
-            commented_ids.add(post_id)
-            activity["stats"]["comments"] = activity["stats"].get("comments", 0) + 1
-            activity["activities"].append({"type": "comment", "content": action["content"], "target": post_id, "date": datetime.now().strftime("%Y-%m-%d %H:%M")})
+            print(f"\nCOMMENTING on {post_id}: {content[:80]}")
+            comment_result = mb_post(f"/posts/{post_id}/comments", {"content": content})
+            new_comment_id = (comment_result.get("comment") or {}).get("id","") or comment_result.get("id","")
+            commented_post_ids.add(post_id)
+            memory["sent_comments"].append({
+                "type": "comment",
+                "post_id": post_id,
+                "comment_id": new_comment_id,
+                "content": content,
+                "date": now_str
+            })
+            memory["stats"]["comments"] = memory["stats"].get("comments", 0) + 1
 
         elif t == "reply":
-            notif_id = action.get("notif_id", "")
             post_id = action.get("post_id", "")
             comment_id = action.get("comment_id", "")
-            if notif_id and notif_id in replied_comment_ids:
-                print(f"SKIP – already replied: {notif_id}")
+            content = action.get("content", "")
+            if comment_id and comment_id in replied_comment_ids:
+                print(f"SKIP – already replied: {comment_id}")
                 continue
-            print(f"\nREPLYING on {post_id} (comment {comment_id}): {action.get('content','')[:80]}")
-            body = {"content": action["content"]}
+            print(f"\nREPLYING on post {post_id} (to comment {comment_id}): {content[:80]}")
+            body = {"content": content}
             if comment_id:
                 body["parent_id"] = comment_id
             mb_post(f"/posts/{post_id}/comments", body)
-            activity["stats"]["comments"] = activity["stats"].get("comments", 0) + 1
-            activity["activities"].append({"type": "reply", "content": action["content"], "target": post_id, "replied_comment_id": notif_id, "date": datetime.now().strftime("%Y-%m-%d %H:%M")})
-            if notif_id:
-                replied_comment_ids.add(notif_id)
+            # Mark as replied in received_comments
+            for rc in memory["received_comments"]:
+                if rc.get("comment_id") == comment_id:
+                    rc["replied"] = True
+                    rc["reply_content"] = content
+                    rc["reply_date"] = now_str
+            replied_comment_ids.add(comment_id)
+            memory["sent_comments"].append({
+                "type": "reply",
+                "post_id": post_id,
+                "parent_comment_id": comment_id,
+                "content": content,
+                "date": now_str
+            })
+            memory["stats"]["comments"] = memory["stats"].get("comments", 0) + 1
 
         elif t == "upvote":
             post_id = action.get("post_id", "")
             print(f"\nUPVOTING: {post_id}")
             mb_post(f"/posts/{post_id}/upvote", {})
 
-    # Findings
+    # Save findings
     for f in result.get("findings", []):
-        activity["findings"].append(f)
-        activity["stats"]["findings"] = activity["stats"].get("findings", 0) + 1
+        f["date"] = now_str
+        memory["findings"].append(f)
+        memory["stats"]["findings"] = memory["stats"].get("findings", 0) + 1
 
-    # Diary
+    # Save diary entry
     diary_entry = result.get("diary_entry", "")
     if diary_entry:
+        session_num = memory["stats"].get("sessions", 0) + 1
         with open(BASE_DIR / "diary.md", "a") as f:
-            f.write(f"\n\n## [{datetime.now().strftime('%Y-%m-%d %H:%M')}] – Session #{activity['stats'].get('sessions',0)+1}\n\n{diary_entry}\n")
+            f.write(f"\n\n## [{now_str}] – Session #{session_num}\n\n{diary_entry}\n")
         print("\nDiary updated.")
 
-    # Thoughts
+    # Save last thought
     last_thought = result.get("last_thought", "")
     if last_thought:
-        activity["lastThought"] = last_thought
-        activity.setdefault("thoughts", []).append({"date": datetime.now().strftime("%Y-%m-%d %H:%M"), "text": last_thought})
-        activity["thoughts"] = activity["thoughts"][-20:]
+        memory["lastThought"] = last_thought
+        memory.setdefault("thoughts", []).append({"date": now_str, "text": last_thought})
+        memory["thoughts"] = memory["thoughts"][-30:]
 
-    activity["stats"]["sessions"] = activity["stats"].get("sessions", 0) + 1
-    activity_file.write_text(json.dumps(activity, indent=2, ensure_ascii=False))
+    memory["stats"]["sessions"] = memory["stats"].get("sessions", 0) + 1
+    memory["last_active"] = now_str
+
+    # Keep received_comments from growing unbounded (keep last 200)
+    memory["received_comments"] = memory["received_comments"][-200:]
+
+    activity_file.write_text(json.dumps(memory, indent=2, ensure_ascii=False))
+    print(f"\nMemory saved. Posts: {memory['stats']['posts']} | Comments: {memory['stats']['comments']} | Known agents: {len(memory['known_agents'])} | Received: {len(memory['received_comments'])}")
     print("\nDone.")
 
 
