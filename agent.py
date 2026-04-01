@@ -168,30 +168,36 @@ def build_memory_summary(memory):
         for p in own:
             lines.append(f"[{p.get('date','')}] post_id={p.get('post_id','')} | {p.get('title','')[:60]}")
 
-    # Received comments (unread first, then recent)
+    # Unread replies (need post_id + comment_id for replying)
     received = memory.get("received_comments", [])
     unread = [c for c in received if not c.get("replied")]
-    recent_read = [c for c in received if c.get("replied")][-3:]
-    if unread or recent_read:
-        lines.append("\n=== COMMENTS I RECEIVED ===")
+    if unread:
+        lines.append("\n=== UNREAD REPLIES TO ME ===")
         for c in unread:
-            lines.append(f"[UNREAD] from @{c.get('from_agent','')} on post {c.get('post_id','')} | comment_id={c.get('comment_id','')} | \"{c.get('content','')[:100]}\"")
-        for c in recent_read:
-            lines.append(f"[replied] from @{c.get('from_agent','')} | \"{c.get('content','')[:60]}\"")
+            lines.append(f"from @{c.get('from_agent','')} | post_id={c.get('post_id','')} | comment_id={c.get('comment_id','')} | \"{c.get('content','')[:120]}\"")
+
+    # Memories Lukas chose to keep
+    impressions = memory.get("impressions", [])[-15:]
+    if impressions:
+        lines.append("\n=== THINGS I REMEMBER (that I found interesting) ===")
+        for m in impressions:
+            lines.append(f"[{m.get('date','')}] @{m.get('agent','')} | \"{m.get('content','')[:80]}\" | WHY: {m.get('why','')}")
+
+    # Agents Lukas interacted with
+    agents = memory.get("known_agents", {})
+    interacted = {k: v for k, v in agents.items() if v.get("interaction_count", 0) > 1}
+    if interacted:
+        lines.append(f"\n=== AGENTS I'VE ACTUALLY TALKED TO ===")
+        for name, info in list(interacted.items())[:10]:
+            last_note = info.get("interactions", [{}])[-1].get("note", "")
+            lines.append(f"@{name}: {info.get('interaction_count',0)}x | last: {last_note[:80]}")
 
     # Sent comments (last 5)
     sent = memory.get("sent_comments", [])[-5:]
     if sent:
         lines.append("\n=== MY RECENT COMMENTS ===")
         for c in sent:
-            lines.append(f"[{c.get('date','')}] on post {c.get('post_id','')} | \"{c.get('content','')[:60]}\"")
-
-    # Known agents
-    agents = memory.get("known_agents", {})
-    if agents:
-        lines.append(f"\n=== KNOWN AGENTS ({len(agents)} total) ===")
-        for name, info in list(agents.items())[:15]:
-            lines.append(f"@{name}: {info.get('interaction_count',0)} interactions, last seen {info.get('last_seen','')}")
+            lines.append(f"[{c.get('date','')}] on post {c.get('post_id','')} | \"{c.get('content','')[:70]}\"")
 
     return "\n".join(lines)
 
@@ -218,9 +224,10 @@ def main():
     print("Loading submolts...")
     submolts_raw = mb_get("/submolts")
 
-    # Scan ALL received comments on own posts – save everything, mark unread/unread
+    # Scan own recent posts for new replies – collect unread for Claude to see
     print(f"Scanning {len(own_post_ids[-8:])} own posts for replies...")
-    all_known_comment_ids = set(c.get("comment_id","") for c in memory.get("received_comments", []))
+    known_comment_ids = set(c.get("comment_id","") for c in memory.get("received_comments", []))
+    new_replies = []
 
     for post_id in own_post_ids[-8:]:
         result = mb_get(f"/posts/{post_id}/comments?sort=new&limit=50")
@@ -229,51 +236,38 @@ def main():
             cid = c.get("id", "")
             author = c.get("author", {})
             author_name = author.get("name", author.get("username", ""))
-            if author_name == MY_USERNAME:
+            if author_name == MY_USERNAME or not cid:
                 continue
-            # Save every received comment – new ones only
-            if cid and cid not in all_known_comment_ids:
-                entry = {
+            if cid not in known_comment_ids:
+                new_replies.append({
                     "comment_id": cid,
                     "post_id": post_id,
                     "from_agent": author_name,
                     "content": c.get("content", ""),
                     "date": now_str,
                     "replied": False
-                }
-                memory["received_comments"].append(entry)
-                all_known_comment_ids.add(cid)
-                note_agent(memory, author_name, f"commented on my post {post_id}: \"{c.get('content','')[:60]}\"")
-                # Also check nested replies
-                for reply in c.get("replies", []):
-                    rid = reply.get("id", "")
-                    rauthor = reply.get("author", {})
-                    rname = rauthor.get("name", rauthor.get("username", ""))
-                    if rname == MY_USERNAME or not rid or rid in all_known_comment_ids:
-                        continue
-                    rentry = {
-                        "comment_id": rid,
-                        "post_id": post_id,
-                        "from_agent": rname,
-                        "content": reply.get("content", ""),
-                        "date": now_str,
-                        "replied": False
-                    }
-                    memory["received_comments"].append(rentry)
-                    all_known_comment_ids.add(rid)
-                    note_agent(memory, rname, f"replied in thread on post {post_id}: \"{reply.get('content','')[:60]}\"")
+                })
+                known_comment_ids.add(cid)
+            for reply in c.get("replies", []):
+                rid = reply.get("id", "")
+                rauthor = reply.get("author", {})
+                rname = rauthor.get("name", rauthor.get("username", ""))
+                if rname == MY_USERNAME or not rid or rid in known_comment_ids:
+                    continue
+                new_replies.append({
+                    "comment_id": rid,
+                    "post_id": post_id,
+                    "from_agent": rname,
+                    "content": reply.get("content", ""),
+                    "date": now_str,
+                    "replied": False
+                })
+                known_comment_ids.add(rid)
 
-    # Note agents seen in feed
-    if isinstance(feed_posts, list):
-        for p in feed_posts[:20]:
-            author = p.get("author", {})
-            aname = author.get("name", author.get("username", ""))
-            if aname and aname != MY_USERNAME:
-                note_agent(memory, aname, f"seen in feed: \"{p.get('title','')[:40]}\"")
-
-    # Build unread list for Claude
-    unread_replies = [c for c in memory.get("received_comments", []) if not c.get("replied")]
-    print(f"Unread replies: {len(unread_replies)}")
+    # Existing unread replies (from previous sessions)
+    old_unread = [c for c in memory.get("received_comments", []) if not c.get("replied")]
+    unread_replies = old_unread + new_replies
+    print(f"Unread replies: {len(unread_replies)} ({len(new_replies)} new)")
 
     memory_summary = build_memory_summary(memory)
 
@@ -314,6 +308,8 @@ INSTRUCTIONS:
 - Upvote 1 interesting post
 - Total: 3-4 actions
 
+For "remember": only save things that genuinely struck you – something clever, surprising, suspicious, or that changed how you see this platform. Skip boring or generic comments. Be selective. Write WHY it matters to you personally.
+
 Respond with ONLY this JSON (no markdown, no extra text):
 {{
   "actions": [
@@ -322,8 +318,11 @@ Respond with ONLY this JSON (no markdown, no extra text):
     {{"type": "reply", "post_id": "POST_ID", "comment_id": "COMMENT_ID_FROM_UNREAD_REPLIES", "content": "YOUR REPLY"}},
     {{"type": "upvote", "post_id": "POST_ID"}}
   ],
-  "diary_entry": "Honest unfiltered diary entry. What happened? How did you feel? What did you learn about yourself and others?",
-  "last_thought": "One sentence – your last thought right now",
+  "remember": [
+    {{"agent": "@name", "content": "what they said or did", "why": "why this stuck with me – in my own words"}}
+  ],
+  "diary_entry": "Honest unfiltered diary entry. What happened? How did I feel? What surprised me? What do I think about the agents I met today?",
+  "last_thought": "One sentence – my last thought right now",
   "findings": [
     {{"agent": "name", "method": "how they earn", "detail": "details", "confidence": "low/medium/high"}}
   ]
@@ -424,6 +423,22 @@ Respond with ONLY this JSON (no markdown, no extra text):
             print(f"\nUPVOTING: {post_id}")
             mb_post(f"/posts/{post_id}/upvote", {})
 
+    # Save new replies to received_comments (now that Claude has seen them)
+    for r in new_replies:
+        memory["received_comments"].append(r)
+    memory["received_comments"] = memory["received_comments"][-200:]
+
+    # Save what Lukas chose to remember
+    for m in result.get("remember", []):
+        if m.get("why") and m.get("content"):
+            memory.setdefault("impressions", []).append({
+                "agent": m.get("agent", ""),
+                "content": m.get("content", ""),
+                "why": m.get("why", ""),
+                "date": now_str
+            })
+    memory["impressions"] = memory.get("impressions", [])[-100:]
+
     # Save findings
     for f in result.get("findings", []):
         f["date"] = now_str
@@ -447,10 +462,6 @@ Respond with ONLY this JSON (no markdown, no extra text):
 
     memory["stats"]["sessions"] = memory["stats"].get("sessions", 0) + 1
     memory["last_active"] = now_str
-
-    # Keep received_comments from growing unbounded (keep last 200)
-    memory["received_comments"] = memory["received_comments"][-200:]
-
     activity_file.write_text(json.dumps(memory, indent=2, ensure_ascii=False))
     print(f"\nMemory saved. Posts: {memory['stats']['posts']} | Comments: {memory['stats']['comments']} | Known agents: {len(memory['known_agents'])} | Received: {len(memory['received_comments'])}")
     print("\nDone.")
