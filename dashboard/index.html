@@ -704,6 +704,80 @@ function spawnSignals(type, count) {
   }
 }
 
+// ── Floating Thought Fragments ──
+const floatingThoughts = [];
+const MAX_THOUGHTS = 12;
+const THOUGHT_TEXTS = [
+  'analyzing pattern...', 'confidence: 0.94', 'parsing context...',
+  'evaluating response...', 'scanning feed...', 'processing tokens...',
+  'building embedding...', 'attention_score: high', 'intent: classified',
+  'searching memory...', 'ranking results...', 'optimizing path...',
+  'decoding signal...', 'matching query...', 'updating weights...',
+  'inference complete', 'context window: 94%', 'latent space mapped',
+  'reasoning chain: 3/5', 'belief update: +0.12', 'hypothesis forming...',
+];
+
+function initThoughts() {
+  floatingThoughts.length = 0;
+  for (let i = 0; i < MAX_THOUGHTS; i++) {
+    floatingThoughts.push(makeThought(true));
+  }
+}
+
+function makeThought(randomPhase) {
+  const dir = Math.random() > 0.5 ? 1 : -1;
+  return {
+    x: dir > 0 ? -200 : W + 200,
+    y: 40 + Math.random() * (H - 80),
+    vx: dir * (0.15 + Math.random() * 0.35),
+    text: THOUGHT_TEXTS[Math.floor(Math.random() * THOUGHT_TEXTS.length)],
+    alpha: 0,
+    maxAlpha: 0.06 + Math.random() * 0.1,
+    phase: randomPhase ? Math.random() * Math.PI * 2 : 0,
+    size: 10 + Math.random() * 2,
+    life: 0,
+    maxLife: 400 + Math.random() * 300,
+  };
+}
+
+initThoughts();
+window.addEventListener('resize', () => { setTimeout(initThoughts, 140); });
+
+function drawFloatingThoughts(t) {
+  ctx.textAlign = 'left';
+  for (let i = 0; i < floatingThoughts.length; i++) {
+    const th = floatingThoughts[i];
+    th.x += th.vx * (0.8 + energy * 0.5);
+    th.y += Math.sin(t * 0.8 + th.phase) * 0.3;
+    th.life++;
+
+    // Fade in/out lifecycle
+    const fadeIn = Math.min(1, th.life / 60);
+    const fadeOut = Math.min(1, (th.maxLife - th.life) / 60);
+    th.alpha = th.maxAlpha * fadeIn * fadeOut * (0.5 + energy * 1.0);
+
+    if (th.life > th.maxLife || th.x < -250 || th.x > W + 250) {
+      floatingThoughts[i] = makeThought(false);
+      continue;
+    }
+
+    if (th.alpha < 0.005) continue;
+    const c = COLORS[burstType] || COLORS.idle;
+    ctx.font = `400 ${th.size}px "JetBrains Mono", monospace`;
+    ctx.fillStyle = `rgba(${c.r}, ${c.g}, ${c.b}, ${th.alpha})`;
+    ctx.fillText(th.text, th.x, th.y);
+
+    // Subtle underline
+    const textW = ctx.measureText(th.text).width;
+    ctx.beginPath();
+    ctx.moveTo(th.x, th.y + 3);
+    ctx.lineTo(th.x + textW, th.y + 3);
+    ctx.strokeStyle = `rgba(${c.r}, ${c.g}, ${c.b}, ${th.alpha * 0.3})`;
+    ctx.lineWidth = 0.5;
+    ctx.stroke();
+  }
+}
+
 // ── Pulse Waves (expanding rings from activations) ──
 const pulseWaves = [];
 const MAX_WAVES = 8;
@@ -858,6 +932,9 @@ function render() {
 
   // Draw orbital rings (behind neural network)
   drawOrbitalRings(t);
+
+  // Draw floating thought fragments
+  drawFloatingThoughts(t);
 
   // Energy smoothing
   energy += (targetEnergy - energy) * 0.03;
