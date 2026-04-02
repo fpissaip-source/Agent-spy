@@ -554,7 +554,7 @@ const COLORS = {
 };
 
 // ── Layers: 3 concentric neural clusters ──
-const TOTAL_NODES = 120;
+const TOTAL_NODES = 200;
 const nodes = [];
 const connections = [];
 
@@ -680,10 +680,57 @@ function triggerActivity(type) {
   }
 }
 
+// ── Hexagonal Grid Background ──
+function drawHexGrid(t) {
+  const hexSize = 35;
+  const hexH = hexSize * Math.sqrt(3);
+  const cols = Math.ceil(W / (hexSize * 1.5)) + 2;
+  const rows = Math.ceil(H / hexH) + 2;
+  const cx = W * 0.5, cy = H * 0.45;
+  const maxDist = Math.hypot(W * 0.5, H * 0.5);
+
+  ctx.lineWidth = 0.5;
+  for (let row = -1; row < rows; row++) {
+    for (let col = -1; col < cols; col++) {
+      const x = col * hexSize * 1.5;
+      const y = row * hexH + (col % 2 ? hexH * 0.5 : 0);
+      const dist = Math.hypot(x - cx, y - cy);
+      const proximity = 1 - (dist / maxDist);
+
+      // Pulse wave from center
+      const wave = Math.sin(dist * 0.015 - t * 2) * 0.5 + 0.5;
+      const alpha = proximity * 0.06 * wave + 0.008;
+
+      if (alpha < 0.005) continue;
+
+      // Energy boost near active areas
+      const energyBoost = energy * proximity * 0.08;
+
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const angle = (Math.PI / 3) * i - Math.PI / 6;
+        const hx = x + hexSize * 0.6 * Math.cos(angle);
+        const hy = y + hexSize * 0.6 * Math.sin(angle);
+        if (i === 0) ctx.moveTo(hx, hy);
+        else ctx.lineTo(hx, hy);
+      }
+      ctx.closePath();
+      const c = COLORS[burstType] || COLORS.idle;
+      ctx.strokeStyle = `rgba(${c.r}, ${c.g}, ${c.b}, ${alpha + energyBoost})`;
+      ctx.stroke();
+    }
+  }
+}
+
 // ── Main render loop ──
 function render() {
   frame++;
   ctx.clearRect(0, 0, W, H);
+
+  const t = frame * 0.01;
+
+  // Draw hex grid as deepest layer
+  drawHexGrid(t);
 
   // Energy smoothing
   energy += (targetEnergy - energy) * 0.03;
@@ -692,7 +739,6 @@ function render() {
     if (burstTimer <= 0) targetEnergy = 0.15;
   }
 
-  const t = frame * 0.01;
   const activeColor = COLORS[burstType] || COLORS.idle;
   const idleColor = COLORS.idle;
 
