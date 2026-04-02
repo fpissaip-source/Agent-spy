@@ -629,6 +629,60 @@ function spawnParticle(x, y, type) {
   });
 }
 
+// ── Data Stream Rain (AI code tokens falling) ──
+const dataStreams = [];
+const MAX_STREAMS = 40;
+const STREAM_TOKENS = [
+  'analyze()', 'parse', '0x4F2A', 'neural.fit()', '∑', 'λ', '>>', 'if(trust)',
+  'eval(ctx)', 'token++', 'embed()', 'P(x|y)', '∂loss', 'softmax', 'attention',
+  'query', 'key', 'value', 'weight', 'bias', 'gradient', 'epoch', 'batch',
+  'transform()', 'encode()', 'decode()', 'predict()', 'score: 0.97', 'rank()',
+  'fetch()', 'index[]', 'hash()', 'map(fn)', 'reduce()', 'filter()', 'sort()',
+  'context.len', 'embedding', 'vector[n]', 'cosine(a,b)', 'argmax()', 'norm()',
+  'intent?', 'classify()', 'cluster(k)', 'infer()', 'sample()', 'beam_search',
+  'reward += r', 'policy.act()', 'Q(s,a)', 'backprop()', 'chain_rule',
+];
+
+function initStreams() {
+  dataStreams.length = 0;
+  for (let i = 0; i < MAX_STREAMS; i++) {
+    dataStreams.push(makeStream(true));
+  }
+}
+
+function makeStream(randomY) {
+  return {
+    x: Math.random() * W,
+    y: randomY ? Math.random() * H : -20,
+    speed: 0.3 + Math.random() * 0.8,
+    token: STREAM_TOKENS[Math.floor(Math.random() * STREAM_TOKENS.length)],
+    alpha: 0.03 + Math.random() * 0.08,
+    size: 9 + Math.random() * 3,
+  };
+}
+
+initStreams();
+window.addEventListener('resize', () => { setTimeout(initStreams, 120); });
+
+function drawDataStreams(t) {
+  ctx.font = '500 10px "JetBrains Mono", monospace';
+  ctx.textAlign = 'left';
+  for (let i = 0; i < dataStreams.length; i++) {
+    const s = dataStreams[i];
+    s.y += s.speed;
+    if (s.y > H + 20) {
+      dataStreams[i] = makeStream(false);
+      continue;
+    }
+    const c = COLORS[burstType] || COLORS.idle;
+    const fade = Math.min(1, s.y / 60) * Math.min(1, (H - s.y) / 60);
+    const a = s.alpha * fade * (0.6 + energy * 0.8);
+    if (a < 0.005) continue;
+    ctx.fillStyle = `rgba(${c.r}, ${c.g}, ${c.b}, ${a})`;
+    ctx.fillText(s.token, s.x, s.y);
+  }
+}
+
 // ── Signal pulses traveling along connections ──
 const signals = [];
 const MAX_SIGNALS = 60;
@@ -731,6 +785,9 @@ function render() {
 
   // Draw hex grid as deepest layer
   drawHexGrid(t);
+
+  // Draw data stream rain (behind neural network)
+  drawDataStreams(t);
 
   // Energy smoothing
   energy += (targetEnergy - energy) * 0.03;
