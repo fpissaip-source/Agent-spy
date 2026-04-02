@@ -611,7 +611,7 @@ window.addEventListener('resize', () => { setTimeout(initNodes, 100); });
 
 // ── Particles (synaptic sparks) ──
 const particles = [];
-const MAX_PARTICLES = 200;
+const MAX_PARTICLES = 400;
 
 function spawnParticle(x, y, type) {
   if (particles.length >= MAX_PARTICLES) return;
@@ -685,7 +685,7 @@ function drawDataStreams(t) {
 
 // ── Signal pulses traveling along connections ──
 const signals = [];
-const MAX_SIGNALS = 60;
+const MAX_SIGNALS = 100;
 
 function spawnSignals(type, count) {
   const c = COLORS[type] || COLORS.idle;
@@ -702,6 +702,68 @@ function spawnSignals(type, count) {
       size: 2 + Math.random() * 3,
     });
   }
+}
+
+// ── Pulse Waves (expanding rings from activations) ──
+const pulseWaves = [];
+const MAX_WAVES = 8;
+
+function spawnPulseWave(x, y, type) {
+  if (pulseWaves.length >= MAX_WAVES) pulseWaves.shift();
+  const c = COLORS[type] || COLORS.idle;
+  pulseWaves.push({ x, y, radius: 0, maxRadius: 150 + Math.random() * 100, speed: 1.5 + Math.random(), alpha: 0.3, r: c.r, g: c.g, b: c.b });
+}
+
+function drawPulseWaves() {
+  for (let i = pulseWaves.length - 1; i >= 0; i--) {
+    const w = pulseWaves[i];
+    w.radius += w.speed * (1 + energy);
+    w.alpha *= 0.985;
+    if (w.radius > w.maxRadius || w.alpha < 0.005) { pulseWaves.splice(i, 1); continue; }
+    ctx.beginPath();
+    ctx.arc(w.x, w.y, w.radius, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(${w.r}, ${w.g}, ${w.b}, ${w.alpha})`;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+}
+
+// ── Orbital Rings (rotating around brain center) ──
+function drawOrbitalRings(t) {
+  const cx = W * 0.5, cy = H * 0.45;
+  const rings = [
+    { rx: W * 0.28, ry: H * 0.18, speed: 0.3, tilt: 0.15 },
+    { rx: W * 0.35, ry: H * 0.22, speed: -0.2, tilt: -0.1 },
+    { rx: W * 0.2,  ry: H * 0.3,  speed: 0.15, tilt: 0.25 },
+  ];
+  const c = COLORS[burstType] || COLORS.idle;
+
+  rings.forEach(ring => {
+    const angle = t * ring.speed;
+    const alpha = 0.04 + energy * 0.08;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(ring.tilt + Math.sin(t * 0.2) * 0.05);
+
+    ctx.beginPath();
+    ctx.ellipse(0, 0, ring.rx, ring.ry, angle, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(${c.r}, ${c.g}, ${c.b}, ${alpha})`;
+    ctx.lineWidth = 0.8;
+    ctx.setLineDash([4, 12]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Small dot traveling along the ring
+    const dotAngle = t * ring.speed * 3;
+    const dx = Math.cos(dotAngle) * ring.rx;
+    const dy = Math.sin(dotAngle) * ring.ry;
+    ctx.beginPath();
+    ctx.arc(dx, dy, 2, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${c.r}, ${c.g}, ${c.b}, ${alpha * 4})`;
+    ctx.fill();
+
+    ctx.restore();
+  });
 }
 
 // ── Trigger activity burst ──
@@ -731,6 +793,11 @@ function triggerActivity(type) {
   // Spawn particles at epicenter
   for (let i = 0; i < (type === 'idle' ? 5 : 25); i++) {
     spawnParticle(epicenter.x, epicenter.y, type);
+  }
+
+  // Spawn pulse wave at epicenter
+  if (type !== 'idle') {
+    spawnPulseWave(epicenter.x, epicenter.y, type);
   }
 }
 
@@ -788,6 +855,9 @@ function render() {
 
   // Draw data stream rain (behind neural network)
   drawDataStreams(t);
+
+  // Draw orbital rings (behind neural network)
+  drawOrbitalRings(t);
 
   // Energy smoothing
   energy += (targetEnergy - energy) * 0.03;
@@ -934,6 +1004,9 @@ function render() {
       ctx.fill();
     }
   });
+
+  // ── Draw pulse waves (on top of nodes) ──
+  drawPulseWaves();
 
   // ── Ambient activity (constant life) ──
   if (frame % 120 === 0) {
