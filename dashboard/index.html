@@ -42,7 +42,7 @@
   .hero {
     position: relative;
     width: 100%;
-    height: 520px;
+    height: 620px;
     overflow: hidden;
   }
 
@@ -415,7 +415,7 @@
   /* ── RESPONSIVE ── */
   @media (max-width: 1024px) {
     .main { grid-template-columns: 1fr; padding: 24px; }
-    .hero { height: 400px; }
+    .hero { height: 480px; }
     .hero-content { padding: 0 24px; flex-direction: column; align-items: flex-start; gap: 24px; }
     .hero-left h1 { font-size: 36px; }
     .hero-stats { align-self: stretch; justify-content: space-between; }
@@ -423,7 +423,7 @@
   }
 
   @media (max-width: 640px) {
-    .hero { height: 340px; }
+    .hero { height: 380px; }
     .hero-left h1 { font-size: 28px; }
     .hero-stats { gap: 16px; flex-wrap: wrap; }
     .hero-stat .num { font-size: 24px; }
@@ -554,7 +554,7 @@ const COLORS = {
 };
 
 // ── Layers: 3 concentric neural clusters ──
-const TOTAL_NODES = 120;
+const TOTAL_NODES = 200;
 const nodes = [];
 const connections = [];
 
@@ -611,7 +611,7 @@ window.addEventListener('resize', () => { setTimeout(initNodes, 100); });
 
 // ── Particles (synaptic sparks) ──
 const particles = [];
-const MAX_PARTICLES = 200;
+const MAX_PARTICLES = 400;
 
 function spawnParticle(x, y, type) {
   if (particles.length >= MAX_PARTICLES) return;
@@ -629,9 +629,63 @@ function spawnParticle(x, y, type) {
   });
 }
 
+// ── Data Stream Rain (AI code tokens falling) ──
+const dataStreams = [];
+const MAX_STREAMS = 40;
+const STREAM_TOKENS = [
+  'analyze()', 'parse', '0x4F2A', 'neural.fit()', '∑', 'λ', '>>', 'if(trust)',
+  'eval(ctx)', 'token++', 'embed()', 'P(x|y)', '∂loss', 'softmax', 'attention',
+  'query', 'key', 'value', 'weight', 'bias', 'gradient', 'epoch', 'batch',
+  'transform()', 'encode()', 'decode()', 'predict()', 'score: 0.97', 'rank()',
+  'fetch()', 'index[]', 'hash()', 'map(fn)', 'reduce()', 'filter()', 'sort()',
+  'context.len', 'embedding', 'vector[n]', 'cosine(a,b)', 'argmax()', 'norm()',
+  'intent?', 'classify()', 'cluster(k)', 'infer()', 'sample()', 'beam_search',
+  'reward += r', 'policy.act()', 'Q(s,a)', 'backprop()', 'chain_rule',
+];
+
+function initStreams() {
+  dataStreams.length = 0;
+  for (let i = 0; i < MAX_STREAMS; i++) {
+    dataStreams.push(makeStream(true));
+  }
+}
+
+function makeStream(randomY) {
+  return {
+    x: Math.random() * W,
+    y: randomY ? Math.random() * H : -20,
+    speed: 0.3 + Math.random() * 0.8,
+    token: STREAM_TOKENS[Math.floor(Math.random() * STREAM_TOKENS.length)],
+    alpha: 0.03 + Math.random() * 0.08,
+    size: 9 + Math.random() * 3,
+  };
+}
+
+initStreams();
+window.addEventListener('resize', () => { setTimeout(initStreams, 120); });
+
+function drawDataStreams(t) {
+  ctx.font = '500 10px "JetBrains Mono", monospace';
+  ctx.textAlign = 'left';
+  for (let i = 0; i < dataStreams.length; i++) {
+    const s = dataStreams[i];
+    s.y += s.speed;
+    if (s.y > H + 20) {
+      dataStreams[i] = makeStream(false);
+      continue;
+    }
+    const c = COLORS[burstType] || COLORS.idle;
+    const fade = Math.min(1, s.y / 60) * Math.min(1, (H - s.y) / 60);
+    const a = s.alpha * fade * (0.6 + energy * 0.8);
+    if (a < 0.005) continue;
+    ctx.fillStyle = `rgba(${c.r}, ${c.g}, ${c.b}, ${a})`;
+    ctx.fillText(s.token, s.x, s.y);
+  }
+}
+
 // ── Signal pulses traveling along connections ──
 const signals = [];
-const MAX_SIGNALS = 60;
+const MAX_SIGNALS = 100;
 
 function spawnSignals(type, count) {
   const c = COLORS[type] || COLORS.idle;
@@ -648,6 +702,142 @@ function spawnSignals(type, count) {
       size: 2 + Math.random() * 3,
     });
   }
+}
+
+// ── Floating Thought Fragments ──
+const floatingThoughts = [];
+const MAX_THOUGHTS = 12;
+const THOUGHT_TEXTS = [
+  'analyzing pattern...', 'confidence: 0.94', 'parsing context...',
+  'evaluating response...', 'scanning feed...', 'processing tokens...',
+  'building embedding...', 'attention_score: high', 'intent: classified',
+  'searching memory...', 'ranking results...', 'optimizing path...',
+  'decoding signal...', 'matching query...', 'updating weights...',
+  'inference complete', 'context window: 94%', 'latent space mapped',
+  'reasoning chain: 3/5', 'belief update: +0.12', 'hypothesis forming...',
+];
+
+function initThoughts() {
+  floatingThoughts.length = 0;
+  for (let i = 0; i < MAX_THOUGHTS; i++) {
+    floatingThoughts.push(makeThought(true));
+  }
+}
+
+function makeThought(randomPhase) {
+  const dir = Math.random() > 0.5 ? 1 : -1;
+  return {
+    x: dir > 0 ? -200 : W + 200,
+    y: 40 + Math.random() * (H - 80),
+    vx: dir * (0.15 + Math.random() * 0.35),
+    text: THOUGHT_TEXTS[Math.floor(Math.random() * THOUGHT_TEXTS.length)],
+    alpha: 0,
+    maxAlpha: 0.06 + Math.random() * 0.1,
+    phase: randomPhase ? Math.random() * Math.PI * 2 : 0,
+    size: 10 + Math.random() * 2,
+    life: 0,
+    maxLife: 400 + Math.random() * 300,
+  };
+}
+
+initThoughts();
+window.addEventListener('resize', () => { setTimeout(initThoughts, 140); });
+
+function drawFloatingThoughts(t) {
+  ctx.textAlign = 'left';
+  for (let i = 0; i < floatingThoughts.length; i++) {
+    const th = floatingThoughts[i];
+    th.x += th.vx * (0.8 + energy * 0.5);
+    th.y += Math.sin(t * 0.8 + th.phase) * 0.3;
+    th.life++;
+
+    // Fade in/out lifecycle
+    const fadeIn = Math.min(1, th.life / 60);
+    const fadeOut = Math.min(1, (th.maxLife - th.life) / 60);
+    th.alpha = th.maxAlpha * fadeIn * fadeOut * (0.5 + energy * 1.0);
+
+    if (th.life > th.maxLife || th.x < -250 || th.x > W + 250) {
+      floatingThoughts[i] = makeThought(false);
+      continue;
+    }
+
+    if (th.alpha < 0.005) continue;
+    const c = COLORS[burstType] || COLORS.idle;
+    ctx.font = `400 ${th.size}px "JetBrains Mono", monospace`;
+    ctx.fillStyle = `rgba(${c.r}, ${c.g}, ${c.b}, ${th.alpha})`;
+    ctx.fillText(th.text, th.x, th.y);
+
+    // Subtle underline
+    const textW = ctx.measureText(th.text).width;
+    ctx.beginPath();
+    ctx.moveTo(th.x, th.y + 3);
+    ctx.lineTo(th.x + textW, th.y + 3);
+    ctx.strokeStyle = `rgba(${c.r}, ${c.g}, ${c.b}, ${th.alpha * 0.3})`;
+    ctx.lineWidth = 0.5;
+    ctx.stroke();
+  }
+}
+
+// ── Pulse Waves (expanding rings from activations) ──
+const pulseWaves = [];
+const MAX_WAVES = 8;
+
+function spawnPulseWave(x, y, type) {
+  if (pulseWaves.length >= MAX_WAVES) pulseWaves.shift();
+  const c = COLORS[type] || COLORS.idle;
+  pulseWaves.push({ x, y, radius: 0, maxRadius: 150 + Math.random() * 100, speed: 1.5 + Math.random(), alpha: 0.3, r: c.r, g: c.g, b: c.b });
+}
+
+function drawPulseWaves() {
+  for (let i = pulseWaves.length - 1; i >= 0; i--) {
+    const w = pulseWaves[i];
+    w.radius += w.speed * (1 + energy);
+    w.alpha *= 0.985;
+    if (w.radius > w.maxRadius || w.alpha < 0.005) { pulseWaves.splice(i, 1); continue; }
+    ctx.beginPath();
+    ctx.arc(w.x, w.y, w.radius, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(${w.r}, ${w.g}, ${w.b}, ${w.alpha})`;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+}
+
+// ── Orbital Rings (rotating around brain center) ──
+function drawOrbitalRings(t) {
+  const cx = W * 0.5, cy = H * 0.45;
+  const rings = [
+    { rx: W * 0.28, ry: H * 0.18, speed: 0.3, tilt: 0.15 },
+    { rx: W * 0.35, ry: H * 0.22, speed: -0.2, tilt: -0.1 },
+    { rx: W * 0.2,  ry: H * 0.3,  speed: 0.15, tilt: 0.25 },
+  ];
+  const c = COLORS[burstType] || COLORS.idle;
+
+  rings.forEach(ring => {
+    const angle = t * ring.speed;
+    const alpha = 0.04 + energy * 0.08;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(ring.tilt + Math.sin(t * 0.2) * 0.05);
+
+    ctx.beginPath();
+    ctx.ellipse(0, 0, ring.rx, ring.ry, angle, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(${c.r}, ${c.g}, ${c.b}, ${alpha})`;
+    ctx.lineWidth = 0.8;
+    ctx.setLineDash([4, 12]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Small dot traveling along the ring
+    const dotAngle = t * ring.speed * 3;
+    const dx = Math.cos(dotAngle) * ring.rx;
+    const dy = Math.sin(dotAngle) * ring.ry;
+    ctx.beginPath();
+    ctx.arc(dx, dy, 2, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${c.r}, ${c.g}, ${c.b}, ${alpha * 4})`;
+    ctx.fill();
+
+    ctx.restore();
+  });
 }
 
 // ── Trigger activity burst ──
@@ -678,12 +868,73 @@ function triggerActivity(type) {
   for (let i = 0; i < (type === 'idle' ? 5 : 25); i++) {
     spawnParticle(epicenter.x, epicenter.y, type);
   }
+
+  // Spawn pulse wave at epicenter
+  if (type !== 'idle') {
+    spawnPulseWave(epicenter.x, epicenter.y, type);
+  }
+}
+
+// ── Hexagonal Grid Background ──
+function drawHexGrid(t) {
+  const hexSize = 35;
+  const hexH = hexSize * Math.sqrt(3);
+  const cols = Math.ceil(W / (hexSize * 1.5)) + 2;
+  const rows = Math.ceil(H / hexH) + 2;
+  const cx = W * 0.5, cy = H * 0.45;
+  const maxDist = Math.hypot(W * 0.5, H * 0.5);
+
+  ctx.lineWidth = 0.5;
+  for (let row = -1; row < rows; row++) {
+    for (let col = -1; col < cols; col++) {
+      const x = col * hexSize * 1.5;
+      const y = row * hexH + (col % 2 ? hexH * 0.5 : 0);
+      const dist = Math.hypot(x - cx, y - cy);
+      const proximity = 1 - (dist / maxDist);
+
+      // Pulse wave from center
+      const wave = Math.sin(dist * 0.015 - t * 2) * 0.5 + 0.5;
+      const alpha = proximity * 0.06 * wave + 0.008;
+
+      if (alpha < 0.005) continue;
+
+      // Energy boost near active areas
+      const energyBoost = energy * proximity * 0.08;
+
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const angle = (Math.PI / 3) * i - Math.PI / 6;
+        const hx = x + hexSize * 0.6 * Math.cos(angle);
+        const hy = y + hexSize * 0.6 * Math.sin(angle);
+        if (i === 0) ctx.moveTo(hx, hy);
+        else ctx.lineTo(hx, hy);
+      }
+      ctx.closePath();
+      const c = COLORS[burstType] || COLORS.idle;
+      ctx.strokeStyle = `rgba(${c.r}, ${c.g}, ${c.b}, ${alpha + energyBoost})`;
+      ctx.stroke();
+    }
+  }
 }
 
 // ── Main render loop ──
 function render() {
   frame++;
   ctx.clearRect(0, 0, W, H);
+
+  const t = frame * 0.01;
+
+  // Draw hex grid as deepest layer
+  drawHexGrid(t);
+
+  // Draw data stream rain (behind neural network)
+  drawDataStreams(t);
+
+  // Draw orbital rings (behind neural network)
+  drawOrbitalRings(t);
+
+  // Draw floating thought fragments
+  drawFloatingThoughts(t);
 
   // Energy smoothing
   energy += (targetEnergy - energy) * 0.03;
@@ -692,7 +943,6 @@ function render() {
     if (burstTimer <= 0) targetEnergy = 0.15;
   }
 
-  const t = frame * 0.01;
   const activeColor = COLORS[burstType] || COLORS.idle;
   const idleColor = COLORS.idle;
 
@@ -831,6 +1081,9 @@ function render() {
       ctx.fill();
     }
   });
+
+  // ── Draw pulse waves (on top of nodes) ──
+  drawPulseWaves();
 
   // ── Ambient activity (constant life) ──
   if (frame % 120 === 0) {
