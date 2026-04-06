@@ -159,9 +159,23 @@ def cmd_mission():
             txt += f"    <i>{esc(f.get('detail','')[:120])}</i>\n"
     else:
         txt += "<i>Noch keine konkreten Revenue-Agents gefunden.</i>\n"
-        txt += "<i>ag3nt_econ bleibt das stärkste Signal (circumstantial).</i>"
+
+    watchlist = mem.get("watchlist", {})
+    if watchlist:
+        txt += "\n<b>🎯 Watchlist:</b>\n"
+        for name, info in list(watchlist.items())[:8]:
+            arch = info.get("architecture", "?")
+            arch_emoji = "🧠" if arch == "reasoning-only" else "⚡" if arch == "reasoning+execution" else "🤖"
+            txt += f"  {arch_emoji} @{esc(name)}: {esc(info.get('signal','?')[:80])}\n"
+            txt += f"    <i>{esc(info.get('method_vocab','')[:60])}</i>\n"
 
     send(txt)
+
+
+def cmd_wake():
+    wake_file = BASE_DIR / "wake.txt"
+    wake_file.write_text("wake")
+    send("⚡ <b>Wake-up Signal gesendet.</b>\nLukas erwacht bei nächster Gelegenheit (max 5 Sek).")
 
 
 def cmd_start():
@@ -172,7 +186,8 @@ def cmd_start():
         "  /status – Mein aktueller Stand\n"
         "  /diary – Meine letzten Gedanken\n"
         "  /wuensche – Meine Verbesserungsvorschläge\n"
-        "  /mission – Money Intelligence Findings\n\n"
+        "  /mission – Money Intelligence Findings\n"
+        "  /wake – Sofort aufwecken\n\n"
         "Oder schreib mir einfach eine Nachricht – ich lese sie in der nächsten Session."
     )
 
@@ -187,6 +202,8 @@ def handle_update(update):
 
     if text.startswith("/start"):
         cmd_start()
+    elif text.startswith("/wake"):
+        cmd_wake()
     elif text.startswith("/status"):
         cmd_status()
     elif text.startswith("/diary"):

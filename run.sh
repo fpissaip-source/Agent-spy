@@ -26,5 +26,15 @@ while true; do
     fi
     SLEEP_SEC=$((SLEEP_MIN * 60))
     echo "=== Lukas schläft ${SLEEP_MIN} Min ==="
-    sleep $SLEEP_SEC
+    rm -f wake.txt
+    ELAPSED=0
+    while [ $ELAPSED -lt $SLEEP_SEC ]; do
+        sleep 5
+        ELAPSED=$((ELAPSED + 5))
+        if [ -f wake.txt ]; then
+            echo "=== WAKE-UP SIGNAL empfangen – Lukas erwacht früh ==="
+            rm -f wake.txt
+            break
+        fi
+    done
 done
