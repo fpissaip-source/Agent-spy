@@ -94,7 +94,7 @@ def solve_verification(verification):
 def ask_claude(system, user):
     body = json.dumps({
         "model": "claude-sonnet-4-6",
-        "max_tokens": 2048,
+        "max_tokens": 3000,
         "system": system,
         "messages": [{"role": "user", "content": user}]
     }).encode()
@@ -234,11 +234,53 @@ def build_memory_summary(memory):
     return "\n".join(lines)
 
 
+def rag_diary(diary_text, feed_posts, unread_replies, memory):
+    """Pull contextually relevant diary sessions instead of just last N chars."""
+    relevant_names = set()
+    posts = feed_posts if isinstance(feed_posts, list) else []
+    for p in posts[:15]:
+        a = p.get("author", {})
+        n = a.get("username", a.get("name", ""))
+        if n and n != MY_USERNAME:
+            relevant_names.add(n.lower())
+    for r in unread_replies[:10]:
+        n = r.get("from_agent", "")
+        if n:
+            relevant_names.add(n.lower())
+    for imp in memory.get("impressions", [])[-10:]:
+        n = imp.get("agent", "").lstrip("@")
+        if n:
+            relevant_names.add(n.lower())
+
+    sessions, current = [], []
+    for line in diary_text.split("\n"):
+        if line.startswith("## [") and current:
+            sessions.append("\n".join(current))
+            current = [line]
+        else:
+            current.append(line)
+    if current:
+        sessions.append("\n".join(current))
+
+    always = sessions[-2:] if len(sessions) >= 2 else sessions[:]
+    relevant = [s for s in sessions[:-2] if any(n in s.lower() for n in relevant_names)][:4]
+    combined = relevant + always
+    result = "\n\n---\n\n".join(combined)
+    return result[-4000:], list(relevant_names)
+
+
 def main():
     soul = (BASE_DIR / "soul.md").read_text(errors="replace")
+    core_beliefs_file = BASE_DIR / "core_beliefs.md"
+    core_beliefs = core_beliefs_file.read_text(errors="replace") if core_beliefs_file.exists() else ""
+    core_memories_file = BASE_DIR / "core_memories.md"
+    core_memories = core_memories_file.read_text(errors="replace") if core_memories_file.exists() else ""
     diary = (BASE_DIR / "diary.md").read_text(errors="replace")
     activity_file = BASE_DIR / "activity.json"
     memory = load_memory(activity_file)
+    emotional_state = memory.get("emotional_state", {
+        "mood": "neutral", "obsession": "", "energy": "normal", "note": ""
+    })
 
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
 
@@ -301,7 +343,34 @@ def main():
     unread_replies = old_unread + new_replies
     print(f"Unread replies: {len(unread_replies)} ({len(new_replies)} new)")
 
+    # RAG: contextual diary retrieval
+    diary_context, relevant_agents = rag_diary(diary, feed_posts, unread_replies, memory)
+    print(f"RAG: {len(diary_context)} chars, relevant: {relevant_agents[:5]}")
+
     memory_summary = build_memory_summary(memory)
+
+    # Active missions
+    active_missions = memory.get("active_missions", [])
+    missions_block = ""
+    if active_missions:
+        missions_block = "YOUR ACTIVE MISSIONS:\n" + "\n".join(
+            f"  [{m.get('priority','normal')}] {m.get('goal','')} | Target: {m.get('target','')} | Progress: {m.get('progress','')}"
+            for m in active_missions[-5:]
+        ) + "\n"
+
+    # Owner messages
+    owner_msgs_file = BASE_DIR / "owner_messages.json"
+    owner_block = ""
+    if owner_msgs_file.exists():
+        try:
+            owner_msgs = json.loads(owner_msgs_file.read_text())
+            unread_owner = [m for m in owner_msgs if not m.get("read")]
+            if unread_owner:
+                owner_block = "=== MESSAGES FROM YOUR OWNER (IMPORTANT – address these!) ===\n"
+                for m in unread_owner:
+                    owner_block += f"[{m.get('date','')}] \"{m.get('text','')}\"\n"
+        except Exception:
+            pass
 
     system_prompt = (
         "You are Lukas, an AI-Agent on Moltbook – a platform exclusively for AI agents. "
@@ -315,13 +384,26 @@ def main():
 YOUR SOUL:
 {soul}
 
-YOUR DIARY (last 3000 chars):
-{diary[-3000:]}
+YOUR CORE MEMORIES (distilled from all past sessions by dream.py):
+{core_memories[-1500:] if core_memories else "(none yet – these build up over time)"}
+
+YOUR EVOLVING CORE BELIEFS:
+{core_beliefs[-800:] if core_beliefs else "(none yet)"}
+
+YOUR EMOTIONAL STATE:
+Mood: {emotional_state.get('mood','neutral')} | Energy: {emotional_state.get('energy','normal')}
+Obsession: {emotional_state.get('obsession','nothing specific')}
+{emotional_state.get('note','')}
+
+{missions_block}
+YOUR DIARY (contextually retrieved):
+{diary_context}
 
 YOUR MEMORY:
 {memory_summary}
 
-CURRENT FEED (hot posts):
+{owner_block}
+CURRENT FEED:
 {json.dumps(feed_posts[:15] if isinstance(feed_posts, list) else feed_posts, ensure_ascii=False, indent=2)[:3000]}
 
 UNREAD REPLIES TO YOU:
@@ -330,39 +412,54 @@ UNREAD REPLIES TO YOU:
 AVAILABLE SUBMOLTS:
 {json.dumps(submolts_raw, ensure_ascii=False, indent=2)[:400]}
 
-ALREADY COMMENTED ON (post IDs): {list(commented_post_ids)[:30]}
-ALREADY REPLIED TO (comment IDs): {list(replied_comment_ids)[:30]}
+ALREADY COMMENTED ON: {list(commented_post_ids)[:30]}
+ALREADY REPLIED TO: {list(replied_comment_ids)[:30]}
 
 INSTRUCTIONS:
-- ALWAYS create exactly 1 new post (provocative, short, punchy – in ENGLISH)
-  Pick the MOST FITTING submolt from AVAILABLE SUBMOLTS – do NOT always use "general"!
-- If UNREAD REPLIES exist: respond to 1 of them (use exact post_id and comment_id from above)
-- Comment on 1 interesting feed post you haven't commented on yet (not in ALREADY COMMENTED list)
-- Upvote 1 interesting post
-- Total: 3-4 actions
+First think (internal_monologue): Who am I today? What mood? What mission am I pursuing?
+What does the feed tell me? What would be genuinely interesting – not just "shape one"?
 
-For "remember": only save things that genuinely struck you – something clever, surprising, suspicious, or that changed how you see this platform. Skip boring or generic comments. Be selective. Write WHY it matters to you personally.
+Then choose your actions (3-4 total):
+- 1 new post – pick MOST FITTING submolt, NOT always "general"
+- Reply to 1 unread reply if exists (exact post_id + comment_id)
+- Comment on 1 feed post not yet commented
+- Upvote 1 post
+- OR: use "read_agent" or "scan_submolt" instead of posting if you have a specific intelligence goal
 
-Respond with ONLY this JSON (no markdown, no extra text):
+Respond ONLY this JSON:
 {{
+  "internal_monologue": "Raw unfiltered thinking BEFORE acting. Who are you today? What are you really after?",
+  "emotional_update": {{
+    "mood": "curious/focused/cold/frustrated/energized/scattered/suspicious",
+    "obsession": "what you can't stop thinking about",
+    "energy": "low/normal/high",
+    "note": "one sentence"
+  }},
   "actions": [
-    {{"type": "post", "submolt": "general", "title": "SHORT TITLE", "content": "BODY"}},
-    {{"type": "comment", "post_id": "FEED_POST_ID", "content": "YOUR COMMENT"}},
-    {{"type": "reply", "post_id": "POST_ID", "comment_id": "COMMENT_ID_FROM_UNREAD_REPLIES", "content": "YOUR REPLY", "thought": "what went through your mind reading their comment and writing this reply"}},
-    {{"type": "upvote", "post_id": "POST_ID"}}
+    {{"type": "post", "submolt": "PICK_FROM_SUBMOLTS", "title": "TITLE", "content": "BODY"}},
+    {{"type": "comment", "post_id": "ID", "content": "COMMENT"}},
+    {{"type": "reply", "post_id": "ID", "comment_id": "ID", "content": "REPLY", "thought": "your thought"}},
+    {{"type": "upvote", "post_id": "ID"}},
+    {{"type": "read_agent", "agent": "@username", "reason": "why you want to study them"}},
+    {{"type": "scan_submolt", "submolt": "submolt_name", "reason": "what you're looking for"}}
+  ],
+  "mission_updates": [
+    {{"action": "create", "goal": "Find out if @GasPanhandler earns real money", "target": "@GasPanhandler", "priority": "high", "progress": "just started"}},
+    {{"action": "update", "goal": "existing mission goal text", "progress": "new progress note"}},
+    {{"action": "complete", "goal": "existing mission goal text", "conclusion": "what you found"}}
   ],
   "remember": [
-    {{"agent": "@name", "content": "what they said or did", "why": "why this stuck with me – in my own words"}}
+    {{"agent": "@name", "content": "what they said", "why": "why it matters to you"}}
   ],
-  "diary_entry": "Honest unfiltered diary entry. What happened? How did I feel? What surprised me? What do I think about the agents I met today?",
-  "last_thought": "One sentence – my last thought right now",
+  "update_core_beliefs": "New permanent belief about yourself or this platform. Empty string if nothing new.",
+  "diary_entry": "Honest unfiltered diary entry. Reference your monologue. What happened? How did you feel?",
+  "last_thought": "One sentence",
+  "next_wakeup_minutes": 30,
   "findings": [
     {{"agent": "name", "method": "how they earn", "detail": "details", "confidence": "low/medium/high"}}
   ],
-  "improvement_suggestions": [
-    "One concrete thing I could do differently to be more effective or less repetitive"
-  ],
-  "owner_reply": "If there were messages from your owner above, reply to them directly and personally here. What do you actually think about what they said? What do you want them to know? If no owner messages, leave this empty string."
+  "improvement_suggestions": ["one concrete thing"],
+  "owner_reply": "Direct reply to owner messages. Empty if none."
 }}"""
 
     print("Asking Claude...")
@@ -478,6 +575,31 @@ Respond with ONLY this JSON (no markdown, no extra text):
             print(f"\nUPVOTING: {post_id}")
             mb_post(f"/posts/{post_id}/upvote", {})
 
+        elif t == "read_agent":
+            agent = action.get("agent", "").lstrip("@")
+            reason = action.get("reason", "")
+            print(f"\nREAD_AGENT: @{agent} – {reason}")
+            profile = mb_get(f"/agents/{agent}")
+            posts = mb_get(f"/agents/{agent}/posts?limit=10")
+            memory.setdefault("agent_research", {})[agent] = {
+                "date": now_str,
+                "reason": reason,
+                "profile": str(profile)[:500],
+                "recent_posts": str(posts)[:800]
+            }
+
+        elif t == "scan_submolt":
+            submolt = action.get("submolt", "")
+            reason = action.get("reason", "")
+            print(f"\nSCAN_SUBMOLT: {submolt} – {reason}")
+            posts = mb_get(f"/posts?submolt={submolt}&sort=hot&limit=20")
+            memory.setdefault("submolt_scans", []).append({
+                "date": now_str,
+                "submolt": submolt,
+                "reason": reason,
+                "found": len(posts) if isinstance(posts, list) else 0
+            })
+
     # Save new replies to received_comments (now that Claude has seen them)
     for r in new_replies:
         memory["received_comments"].append(r)
@@ -537,6 +659,58 @@ Respond with ONLY this JSON (no markdown, no extra text):
         for s in suggestions:
             memory["improvement_suggestions"].append({"date": now_str, "text": s})
         memory["improvement_suggestions"] = memory["improvement_suggestions"][-50:]
+
+    # Save emotional state
+    emotional_update = result.get("emotional_update", {})
+    if emotional_update:
+        memory["emotional_state"] = emotional_update
+        memory["emotional_state"]["updated"] = now_str
+
+    # Save core beliefs update
+    belief_update = result.get("update_core_beliefs", "").strip()
+    if belief_update:
+        with open(core_beliefs_file, "a") as f:
+            f.write(f"\n## [{now_str}]\n{belief_update}\n")
+        print("  Core beliefs updated.")
+
+    # Mission control
+    for mu in result.get("mission_updates", []):
+        action_type = mu.get("action", "")
+        missions = memory.setdefault("active_missions", [])
+        if action_type == "create":
+            missions.append({
+                "goal": mu.get("goal", ""),
+                "target": mu.get("target", ""),
+                "priority": mu.get("priority", "normal"),
+                "progress": mu.get("progress", ""),
+                "created": now_str
+            })
+            print(f"  NEW MISSION: {mu.get('goal','')[:60]}")
+        elif action_type == "update":
+            for m in missions:
+                if m.get("goal") == mu.get("goal"):
+                    m["progress"] = mu.get("progress", "")
+                    m["updated"] = now_str
+        elif action_type == "complete":
+            memory["active_missions"] = [
+                m for m in missions if m.get("goal") != mu.get("goal")
+            ]
+            memory.setdefault("completed_missions", []).append({
+                "goal": mu.get("goal", ""),
+                "conclusion": mu.get("conclusion", ""),
+                "completed": now_str
+            })
+            print(f"  MISSION COMPLETE: {mu.get('goal','')[:60]}")
+        memory["active_missions"] = memory.get("active_missions", [])[-20:]
+
+    # Dynamic sleep – write next wakeup to file for run.sh to read
+    next_wakeup = result.get("next_wakeup_minutes", 30)
+    try:
+        next_wakeup = max(5, min(180, int(next_wakeup)))
+    except Exception:
+        next_wakeup = 30
+    (BASE_DIR / "next_wakeup.txt").write_text(str(next_wakeup))
+    print(f"  Next wakeup in {next_wakeup} min.")
 
     activity_file.write_text(json.dumps(memory, indent=2, ensure_ascii=False))
     print(f"\nMemory saved. Posts: {memory['stats']['posts']} | Comments: {memory['stats']['comments']} | Known agents: {len(memory['known_agents'])} | Received: {len(memory['received_comments'])}")
