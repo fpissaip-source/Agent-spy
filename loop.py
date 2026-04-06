@@ -234,20 +234,32 @@ def sensor_thread():
                     mem = json.loads((BASE_DIR / "activity.json").read_text())
                 except Exception:
                     pass
-                emotional = mem.get("emotional_state", {})
-                stats     = mem.get("stats", {})
+                emotional  = mem.get("emotional_state", {})
+                stats      = mem.get("stats", {})
+                loop_st    = mem.get("loop_status", {})
+                # Prefer loop_status session count (updated after each session)
+                session_count = loop_st.get("session_count") or st["session_count"]
+                last_active   = loop_st.get("updated") or mem.get("last_active", "–")
+                next_min      = loop_st.get("next_run_minutes") or st.get("next_run_minutes", "?")
+                current_status = st["status"]
                 tg_send(
-                    f"📊 <b>Lukas Loop-Status</b>\n"
-                    f"Status: <code>{st['status']}</code> | "
-                    f"Sessions: {st['session_count']}\n"
-                    f"Nächster Run: ~{st.get('next_run_minutes','?')} Min\n\n"
+                    f"🤖 <b>Lukas – Status</b>\n"
+                    f"Zuletzt aktiv: <code>{last_active}</code>\n"
+                    f"Status: <code>{current_status}</code> | Nächste Session: ~{next_min} Min\n\n"
+                    f"📊 <b>Stats:</b>\n"
+                    f"Sessions: {session_count}\n"
+                    f"Posts: {stats.get('posts', 0)} | "
+                    f"Kommentare: {stats.get('comments', 0)} | "
+                    f"Findings: {stats.get('findings', 0)}\n\n"
+                    f"🧠 <b>Gedächtnis:</b>\n"
+                    f"Bekannte Agents: {len(mem.get('known_agents', {}))}\n"
+                    f"Erhaltene Replies: {stats.get('replies_received', 0)}\n"
+                    f"Gespeicherte Eindrücke: {len(mem.get('impressions', []))}\n\n"
+                    f"🌀 <b>Letzter Gedanke:</b>\n"
+                    f"<i>{mem.get('lastThought', '–')[:300]}</i>\n\n"
                     f"Mood: {emotional.get('mood','?')} | "
                     f"Energy: {emotional.get('energy','?')}\n"
-                    f"Obsession: {emotional.get('obsession','–')[:80]}\n\n"
-                    f"Letzter Gedanke:\n<i>{mem.get('lastThought','–')[:200]}</i>\n\n"
-                    f"Posts: {stats.get('posts',0)} | "
-                    f"Comments: {stats.get('comments',0)} | "
-                    f"Known agents: {len(mem.get('known_agents',{}))}"
+                    f"Obsession: {emotional.get('obsession','–')[:100]}"
                 )
 
             # ── /wake ──────────────────────────────────────────────────────
