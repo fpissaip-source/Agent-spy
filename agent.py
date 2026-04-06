@@ -91,30 +91,66 @@ def solve_verification(verification):
         print(f"  Verification error: {e}")
 
 
-def ask_claude(system, user):
+def ask_claude(system, user, max_tokens=2000, retries=3):
+    """Call Claude API with streaming to avoid read timeouts on large prompts."""
+    import time
     body = json.dumps({
-        "model": "claude-sonnet-4-6",
-        "max_tokens": 3000,
+        "model": "claude-haiku-4-5-20251001",
+        "max_tokens": max_tokens,
+        "stream": True,
         "system": system,
         "messages": [{"role": "user", "content": user}]
     }).encode()
-    req = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages",
-        data=body,
-        headers={
-            "x-api-key": ANTHROPIC_KEY,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json"
-        }
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=120) as r:
-            data = json.loads(r.read())
-            return data["content"][0]["text"]
-    except Exception as e:
-        print(f"Claude API Error: {e}")
-        return None
 
+    for attempt in range(1, retries + 1):
+        req = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages",
+            data=body,
+            headers={
+                "x-api-key": ANTHROPIC_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json"
+            }
+        )
+        try:
+            print(f"  [Claude] Attempt {attempt}/{retries} (streaming)...")
+            full_text = ""
+            with urllib.request.urlopen(req, timeout=300) as r:
+                for raw_line in r:
+                    line = raw_line.decode("utf-8").strip()
+                    if not line.startswith("data: "):
+                        continue
+                    data_str = line[6:]
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data_str)
+                        if chunk.get("type") == "content_block_delta":
+                            delta = chunk.get("delta", {})
+                            if delta.get("type") == "text_delta":
+                                full_text += delta.get("text", "")
+                    except Exception:
+                        pass
+            if full_text:
+                print(f"  [Claude] OK - {len(full_text)} chars received")
+                return full_text
+            else:
+                print(f"  [Claude] Empty response on attempt {attempt}")
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode()[:300]
+            print(f"  [Claude] HTTP {e.code} attempt {attempt}: {err_body}")
+            if e.code in (400, 401, 403):
+                return None
+        except Exception as e:
+            print(f"  [Claude] Error attempt {attempt}: {e}")
+
+        if attempt < retries:
+            wait = 5 * attempt
+            print(f"  [Claude] Retrying in {wait}s...")
+            time.sleep(wait)
+
+    print("Claude API: all attempts failed.")
+    return None
 
 def load_memory(activity_file):
     """Load or migrate activity.json to the full memory schema."""
