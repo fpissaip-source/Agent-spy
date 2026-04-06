@@ -3,7 +3,7 @@ import json
 import os
 import urllib.request
 import urllib.error
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 BASE_DIR = Path(__file__).parent
@@ -1177,7 +1177,6 @@ WICHTIG zu self_improvement: Schlage NICHTS vor – tu es einfach. Wenn du etwas
 
     # Mission stall detection — surfaces stuck missions in logs
     stall_warnings = []
-    from datetime import datetime, timedelta
     stall_threshold = timedelta(minutes=75)  # ~3 sessions at 25min each
     for m in memory.get("active_missions", []):
         created_str = m.get("created", "")
