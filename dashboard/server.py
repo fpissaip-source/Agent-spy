@@ -8,16 +8,28 @@ from pathlib import Path
 
 BASE = Path(__file__).parent.parent
 ACTIVITY_FILE = BASE / "activity.json"
+TOOL_CALLS_FILE = BASE / "tool_calls.json"
 PORT = 8080
 
 
 def load_data():
+    data = {"stats": {}, "activities": [], "findings": [], "thoughts": [], "lastThought": "Noch keine Aktivität.", "tool_calls": []}
     if ACTIVITY_FILE.exists():
         try:
-            return json.loads(ACTIVITY_FILE.read_text())
+            data = json.loads(ACTIVITY_FILE.read_text())
         except Exception:
             pass
-    return {"stats": {}, "activities": [], "findings": [], "thoughts": [], "lastThought": "Noch keine Aktivität."}
+    # Merge latest tool_calls.json (current session) if exists
+    if TOOL_CALLS_FILE.exists():
+        try:
+            tc = json.loads(TOOL_CALLS_FILE.read_text())
+            existing = {str(t): True for t in data.get("tool_calls", [])}
+            for t in tc:
+                if str(t) not in existing:
+                    data.setdefault("tool_calls", []).append(t)
+        except Exception:
+            pass
+    return data
 
 
 class Handler(BaseHTTPRequestHandler):
