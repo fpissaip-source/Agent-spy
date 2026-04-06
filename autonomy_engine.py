@@ -17,6 +17,7 @@ GOALS_FILE = BASE_DIR / "goals.json"
 PLANS_FILE = BASE_DIR / "plans.json"
 SOUL_FILE = BASE_DIR / "soul.md"
 REFLECTION_FILE = BASE_DIR / "reflections.json"
+TASKS_FILE = BASE_DIR / "scheduled_tasks.json"
 
 IMMUTABLE_SECTIONS = frozenset({
     "IDENTITY",
@@ -321,6 +322,80 @@ class Reflector:
         return "\n".join(lines)
 
 
+
+
+class TaskScheduler:
+    """Scheduled tasks for future sessions. Lukas can queue actions to do next time he wakes up."""
+
+    def __init__(self):
+        self.tasks = self._load()
+
+    def _load(self) -> list:
+        if TASKS_FILE.exists():
+            try:
+                return json.loads(TASKS_FILE.read_text())
+            except (json.JSONDecodeError, OSError):
+                pass
+        return []
+
+    def _save(self):
+        TASKS_FILE.write_text(json.dumps(self.tasks, indent=2, default=str))
+
+    def schedule(self, action: str, priority: str = "normal", 
+                 earliest_session: int = 0, context: str = "") -> dict:
+        task = {
+            "id": len(self.tasks) + 1,
+            "action": action,
+            "priority": priority,
+            "earliest_session": earliest_session,
+            "context": context,
+            "status": "pending",
+            "created": datetime.now().isoformat(),
+            "completed": None,
+        }
+        self.tasks.append(task)
+        self._save()
+        return task
+
+    def get_pending(self, current_session: int = 0) -> list:
+        return [
+            t for t in self.tasks 
+            if t["status"] == "pending" 
+            and t.get("earliest_session", 0) <= current_session
+        ]
+
+    def complete_task(self, task_id: int, result: str = "") -> str:
+        for t in self.tasks:
+            if t["id"] == task_id:
+                t["status"] = "done"
+                t["completed"] = datetime.now().isoformat()
+                t["result"] = result
+                self._save()
+                return f"Task #{task_id} completed: {t['action'][:50]}"
+        return f"Task #{task_id} not found"
+
+    def skip_task(self, task_id: int, reason: str = "") -> str:
+        for t in self.tasks:
+            if t["id"] == task_id:
+                t["status"] = "skipped"
+                t["skip_reason"] = reason
+                self._save()
+                return f"Task #{task_id} skipped"
+        return f"Task #{task_id} not found"
+
+    def get_context(self) -> str:
+        pending = [t for t in self.tasks if t["status"] == "pending"]
+        if not pending:
+            return "No scheduled tasks."
+        lines = [f"Scheduled tasks ({len(pending)} pending):"]
+        for t in sorted(pending, key=lambda x: {"urgent": 0, "high": 1, "normal": 2, "low": 3}.get(x.get("priority", "normal"), 2)):
+            pri = t.get("priority", "normal").upper()
+            lines.append(f"  [{pri}] #{t['id']}: {t['action']}")
+            if t.get("context"):
+                lines.append(f"    Context: {t['context'][:100]}")
+        return "
+".join(lines)
+
 AUTONOMY_TOOL_DEFINITIONS = [
     {
         "name": "set_goal",
@@ -477,6 +552,34 @@ AUTONOMY_TOOL_DEFINITIONS = [
             },
             "required": []
         }
+    },
+    {
+        "name": "schedule_task",
+        "description": (
+            "Schedule an action for a future session. Use when you identify something worth doing "
+            "but can't do it right now. The task will appear in your context next time you wake up."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "description": "What to do (be specific)"},
+                "priority": {"type": "string", "enum": ["low", "normal", "high", "urgent"], "description": "How important"},
+                "context": {"type": "string", "description": "Additional context or notes"}
+            },
+            "required": ["action"]
+        }
+    },
+    {
+        "name": "complete_scheduled_task",
+        "description": "Mark a scheduled task as done after you've completed it.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "integer", "description": "Task ID to complete"},
+                "result": {"type": "string", "description": "What was the outcome"}
+            },
+            "required": ["task_id"]
+        }
     }
 ]
 
@@ -485,10 +588,15 @@ _goal_manager = GoalManager()
 _planner = Planner()
 _soul_evolver = SoulEvolver()
 _reflector = Reflector(_goal_manager, _planner, _soul_evolver)
+_task_scheduler = TaskScheduler()
 
 
 def get_autonomy_context() -> str:
-    return _reflector.get_context_for_session()
+    ctx = _reflector.get_context_for_session()
+    tasks_ctx = _task_scheduler.get_context()
+    if tasks_ctx != "No scheduled tasks.":
+        ctx += "\n\n=== SCHEDULED TASKS ===\n" + tasks_ctx
+    return ctx
 
 
 def get_autonomy_tools() -> list:
@@ -606,5 +714,19 @@ def execute_autonomy_tool(name: str, input_data: dict) -> str:
             return "\n".join(entries) if entries else "(empty directory)"
         except Exception as e:
             return f"List error: {e}"
+
+    elif name == "schedule_task":
+        task = _task_scheduler.schedule(
+            input_data.get("action", ""),
+            input_data.get("priority", "normal"),
+            context=input_data.get("context", "")
+        )
+        return f"Task #{task['id']} scheduled: {task['action'][:80]}"
+
+    elif name == "complete_scheduled_task":
+        return _task_scheduler.complete_task(
+            input_data.get("task_id", 0),
+            input_data.get("result", "")
+        )
 
     return f"Unknown autonomy tool: {name}"
