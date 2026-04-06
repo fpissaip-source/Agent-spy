@@ -1,23 +1,37 @@
 #!/bin/bash
-SESSION="lukas"
-WORKDIR="/home/user/Agent-spy"
+DIR="$(cd "$(dirname "$0")" && pwd)"
+PIDFILE="$DIR/loop.pid"
+LOGFILE="$DIR/lukas.log"
 
-if tmux has-session -t "$SESSION" 2>/dev/null; then
-    tmux kill-session -t "$SESSION"
+echo "=== Lukas Starter ==="
+
+if [ -f "$PIDFILE" ]; then
+    OLD_PID=$(cat "$PIDFILE")
+    if kill -0 "$OLD_PID" 2>/dev/null; then
+        echo "Stopping old loop (PID $OLD_PID)..."
+        kill "$OLD_PID"
+        sleep 2
+        kill -0 "$OLD_PID" 2>/dev/null && kill -9 "$OLD_PID"
+    fi
+    rm -f "$PIDFILE"
 fi
 
-chmod +x "$WORKDIR/run.sh"
+pkill -f "python3.*loop\.py" 2>/dev/null
+sleep 2
 
-export TELEGRAM_BOT_TOKEN="8732113819:AAGTyPdaaKTux3u3gmSn0xvCS56RAMNvtJg"
-export TELEGRAM_CHAT_ID="8173653416"
+set -a
+source "$DIR/.env"
+set +a
 
-# Start Lukas agent loop
-tmux new-session -d -s "$SESSION" -c "$WORKDIR" "$WORKDIR/run.sh"
+echo "Starting Lukas loop..."
+nohup python3 -u "$DIR/loop.py" >> "$LOGFILE" 2>&1 &
+NEW_PID=$!
+disown $NEW_PID
 
-# Start Telegram bot in second window
-tmux new-window -t "$SESSION" -c "$WORKDIR"
-tmux send-keys -t "$SESSION:1" "TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID=$TELEGRAM_CHAT_ID python3 telegram_bot.py" Enter
-
-echo "Lukas läuft! -> tmux attach -t $SESSION"
-echo "  Window 0: Agent Loop"
-echo "  Window 1: Telegram Bot"
+sleep 1
+if kill -0 "$NEW_PID" 2>/dev/null; then
+    echo "Lukas running! PID=$NEW_PID"
+    echo "Log: tail -f $LOGFILE"
+else
+    echo "ERROR: Process died immediately. Check $LOGFILE"
+fi
