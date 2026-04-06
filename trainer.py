@@ -58,7 +58,7 @@ def load_all_records() -> tuple[list[dict], list[str]]:
     if not TRAINING_DIR.exists():
         return [], ["training_data/ directory not found"]
     files = sorted(TRAINING_DIR.rglob("*.jsonl"))
-    files = [f for f in files if f.name != "merged_train.jsonl"]
+    files = [f for f in files if f.name not in ("merged_train.jsonl", "_index.jsonl")]
     if not files:
         return [], ["No .jsonl training files found in training_data/"]
     for fpath in files:
@@ -242,7 +242,7 @@ def launch_runpod(merged_path: Path) -> None:
         print(f"  GPU      : {RUNPOD_GPU}")
         print(f"  Cost     : ~${cost}/hr")
         print(f"  Model    : {RUNPOD_MODEL}")
-        print(f"  Training : {len(json.loads(merged_path.read_text().splitlines()[0]).get('messages', []))} sessions")
+        print(f"  Records  : {sum(1 for l in merged_path.read_text().splitlines() if l.strip())} training pairs")
     except urllib.error.HTTPError as e:
         print(f"  RunPod API error {e.code}: {e.read().decode()[:300]}")
     except Exception as e:
