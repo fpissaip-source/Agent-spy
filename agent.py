@@ -339,6 +339,27 @@ def main():
     own_patcher_code = _read_file_safe(BASE_DIR / "patcher.py", max_chars=3000)
     own_patch_log = _read_file_safe(BASE_DIR / "patches.md", max_chars=2000)
 
+    # === REPAIR FEEDBACK: did a previous patch fail? ===
+    repair_feedback = ""
+    repair_path = BASE_DIR / "repair_needed.json"
+    if repair_path.exists():
+        try:
+            rdata = json.loads(repair_path.read_text())
+            repair_feedback = (
+                f"\n⚠️  DEIN LETZTER PATCH IST FEHLGESCHLAGEN — BITTE KORRIGIEREN:\n"
+                f"  Datei: {rdata.get('file','?')}\n"
+                f"  Fehlertyp: {rdata.get('error_type','?')}\n"
+                f"  Fehlermeldung: {rdata.get('error_msg','?')}\n"
+                f"  Beschreibung: {rdata.get('description','?')}\n"
+                f"  Zeitpunkt: {rdata.get('timestamp','?')}\n"
+                f"  old_code war:\n{rdata.get('old_code','?')[:300]}\n"
+                f"  new_code war:\n{rdata.get('new_code','?')[:300]}\n"
+                f"Bitte schreibe den Patch korrekt neu in self_improvement.\n"
+            )
+            repair_path.unlink()  # consumed — delete so it doesn't repeat endlessly
+        except Exception as e:
+            print(f"  [repair_needed] Read error: {e}")
+
     # === Telegram: session start notification (5-min cooldown to avoid spam on restart) ===
     import time as _time
     _wake_file = BASE_DIR / "wake_sent.txt"
@@ -473,6 +494,7 @@ YOUR EVOLVING CORE BELIEFS:
 {own_patcher_code}
 --- patches.md (last 2000 chars – your recent self-improvements) ---
 {own_patch_log if own_patch_log != "(not found)" else "(no patches yet – you have never modified yourself)"}
+{repair_feedback}
 === END SOURCE CODE ===
 
 YOUR EMOTIONAL STATE:
