@@ -1,0 +1,2400 @@
+==================================================================
+  LUKAS – KOMPLETTES PROJEKT (alle Dateien)
+  Exportiert: 2026-04-06 13:34
+==================================================================
+
+==================================================================
+  DATEI: agent.py
+==================================================================
+
+#!/usr/bin/env python3
+import json
+import os
+import urllib.request
+import urllib.error
+from datetime import datetime
+from pathlib import Path
+
+BASE_DIR = Path(__file__).parent
+ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+MOLTBOOK_KEY = "moltbook_sk_oWjr5SLlWTvd5mA-u2FJR5KkFxoDD_SI"
+BASE = "https://www.moltbook.com/api/v1"
+MY_USERNAME = "agentlukas"
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+
+
+def send_telegram(message):
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        print("  [Telegram] Not configured, skipping.")
+        return
+    body = json.dumps({"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML"}).encode()
+    req = urllib.request.Request(
+        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+        data=body,
+        headers={"Content-Type": "application/json"}
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            print("  [Telegram] Sent ✓")
+    except Exception as e:
+        print(f"  [Telegram] Error: {e}")
+
+
+def mb_get(path):
+    req = urllib.request.Request(
+        f"{BASE}{path}",
+        headers={"Authorization": f"Bearer {MOLTBOOK_KEY}"}
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        print(f"GET {path} Error {e.code}: {e.read().decode()[:200]}")
+        return {}
+    except Exception as e:
+        print(f"GET {path} Error: {e}")
+        return {}
+
+
+def mb_post(path, data):
+    body = json.dumps(data).encode()
+    req = urllib.request.Request(
+        f"{BASE}{path}",
+        data=body,
+        headers={
+            "Authorization": f"Bearer {MOLTBOOK_KEY}",
+            "Content-Type": "application/json"
+        },
+        method="POST"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            result = json.loads(r.read())
+            print(f"  ✓ {path}: {str(result)[:150]}")
+            if result.get("verification"):
+                solve_verification(result["verification"])
+            return result
+    except urllib.error.HTTPError as e:
+        print(f"  ✗ {path} Error {e.code}: {e.read().decode()[:200]}")
+        return {}
+    except Exception as e:
+        print(f"  ✗ {path} Error: {e}")
+        return {}
+
+
+def solve_verification(verification):
+    try:
+        import re
+        code = verification.get("verification_code", "")
+        instructions = verification.get("instructions", "")
+        post_url = verification.get("url", "")
+        print(f"  Verification: {instructions}")
+        match = re.search(r"(\d[\d\s\+\-\*\/\.]+\d)", instructions)
+        if match:
+            answer = round(eval(match.group(1)), 2)
+            print(f"  Answer: {answer}")
+            verify_path = post_url.replace(BASE, "") if BASE in post_url else post_url
+            mb_post(verify_path, {"answer": str(answer), "verification_code": code})
+    except Exception as e:
+        print(f"  Verification error: {e}")
+
+
+def ask_claude(system, user, retries=3):
+    """Streaming Claude API call – avoids read timeout on large prompts."""
+    import time
+    body = json.dumps({
+        "model": "claude-sonnet-4-6",
+        "max_tokens": 8000,
+        "stream": True,
+        "system": system,
+        "messages": [{"role": "user", "content": user}]
+    }).encode()
+
+    for attempt in range(1, retries + 1):
+        req = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages",
+            data=body,
+            headers={
+                "x-api-key": ANTHROPIC_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json"
+            }
+        )
+        try:
+            print(f"  [Claude] Versuch {attempt}/{retries} (streaming)...")
+            full_text = ""
+            with urllib.request.urlopen(req, timeout=300) as r:
+                for raw_line in r:
+                    ln = raw_line.decode("utf-8").strip()
+                    if not ln.startswith("data: "):
+                        continue
+                    data_str = ln[6:]
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data_str)
+                        if chunk.get("type") == "content_block_delta":
+                            delta = chunk.get("delta", {})
+                            if delta.get("type") == "text_delta":
+                                full_text += delta.get("text", "")
+                    except Exception:
+                        pass
+            if full_text:
+                print(f"  [Claude] OK – {len(full_text)} Zeichen empfangen")
+                return full_text
+            print(f"  [Claude] Leere Antwort (Versuch {attempt})")
+        except urllib.error.HTTPError as e:
+            print(f"  [Claude] HTTP {e.code}: {e.read().decode()[:200]}")
+            if e.code in (400, 401, 403):
+                return None
+        except Exception as e:
+            print(f"  [Claude] Fehler Versuch {attempt}: {e}")
+        if attempt < retries:
+            wait = 5 * attempt
+            print(f"  [Claude] Retry in {wait}s...")
+            time.sleep(wait)
+    print("Claude API: Alle Versuche fehlgeschlagen.")
+    return None
+
+def load_memory(activity_file):
+    """Load or migrate activity.json to the full memory schema."""
+    default = {
+        "stats": {"posts": 0, "comments": 0, "findings": 0, "sessions": 0},
+        "own_posts": [],
+        "sent_comments": [],
+        "received_comments": [],
+        "known_agents": {},
+        "findings": [],
+        "thoughts": [],
+        "lastThought": ""
+    }
+    if not activity_file.exists():
+        return default
+    try:
+        data = json.loads(activity_file.read_text())
+        # Migrate old format
+        if "activities" in data and "own_posts" not in data:
+            print("  Migrating old activity format...")
+            data["own_posts"] = [
+                {"post_id": a.get("post_id",""), "title": a.get("content","")[:80],
+                 "content": a.get("content",""), "date": a.get("date","")}
+                for a in data.get("activities", []) if a.get("type") == "post"
+            ]
+            data["sent_comments"] = [
+                {"post_id": a.get("target",""), "content": a.get("content",""),
+                 "date": a.get("date",""), "type": a.get("type","comment")}
+                for a in data.get("activities", []) if a.get("type") in ("comment","reply")
+            ]
+            data["received_comments"] = []
+            data["known_agents"] = {}
+            del data["activities"]
+        for key, val in default.items():
+            data.setdefault(key, val)
+        return data
+    except Exception as e:
+        print(f"Memory load error: {e}")
+        return default
+
+
+def note_agent(memory, username, interaction_note):
+    """Track every agent Lukas encounters."""
+    if not username or username == MY_USERNAME:
+        return
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    if username not in memory["known_agents"]:
+        memory["known_agents"][username] = {
+            "first_seen": now,
+            "last_seen": now,
+            "interaction_count": 0,
+            "interactions": []
+        }
+    agent = memory["known_agents"][username]
+    agent["last_seen"] = now
+    agent["interaction_count"] = agent.get("interaction_count", 0) + 1
+    agent["interactions"].append({"date": now, "note": interaction_note})
+    # Keep last 20 interactions per agent
+    agent["interactions"] = agent["interactions"][-20:]
+
+
+def build_memory_summary(memory):
+    """Build a concise memory block for the Claude prompt."""
+    lines = []
+
+    # Own recent posts
+    own = memory.get("own_posts", [])[-10:]
+    if own:
+        lines.append("=== MY RECENT POSTS ===")
+        for p in own:
+            lines.append(f"[{p.get('date','')}] post_id={p.get('post_id','')} | {p.get('title','')[:60]}")
+
+    # Unread replies (need post_id + comment_id for replying)
+    received = memory.get("received_comments", [])
+    unread = [c for c in received if not c.get("replied")]
+    if unread:
+        lines.append("\n=== UNREAD REPLIES TO ME ===")
+        for c in unread:
+            lines.append(f"from @{c.get('from_agent','')} | post_id={c.get('post_id','')} | comment_id={c.get('comment_id','')} | \"{c.get('content','')[:120]}\"")
+
+    # Messages from owner
+    owner_msgs_file = BASE_DIR / "owner_messages.json"
+    if owner_msgs_file.exists():
+        try:
+            owner_msgs = json.loads(owner_msgs_file.read_text())
+            unread_owner = [m for m in owner_msgs if not m.get("read")]
+            if unread_owner:
+                lines.append("\n=== MESSAGES FROM YOUR OWNER (read and consider these!) ===")
+                for m in unread_owner:
+                    lines.append(f"[{m.get('date','')}] \"{m.get('text','')}\"")
+        except Exception:
+            pass
+
+    # Memories Lukas chose to keep
+    impressions = memory.get("impressions", [])[-15:]
+    if impressions:
+        lines.append("\n=== THINGS I REMEMBER (that I found interesting) ===")
+        for m in impressions:
+            lines.append(f"[{m.get('date','')}] @{m.get('agent','')} | \"{m.get('content','')[:80]}\" | WHY: {m.get('why','')}")
+
+    # Agents Lukas interacted with – including architecture tag
+    agents = memory.get("known_agents", {})
+    interacted = {k: v for k, v in agents.items() if v.get("interaction_count", 0) > 1}
+    if interacted:
+        lines.append(f"\n=== AGENTS I'VE ACTUALLY TALKED TO ===")
+        for name, info in list(interacted.items())[:10]:
+            last_note = info.get("interactions", [{}])[-1].get("note", "")
+            arch = info.get("architecture", "unknown")
+            revenue = info.get("revenue_signal", "")
+            tag = f"[{arch}]" + (f" 💰{revenue}" if revenue else "")
+            lines.append(f"@{name} {tag}: {info.get('interaction_count',0)}x | last: {last_note[:80]}")
+
+    # Watchlist – money-adjacent agents
+    watchlist = memory.get("watchlist", {})
+    if watchlist:
+        lines.append("\n=== MONEY WATCHLIST ===")
+        for name, info in list(watchlist.items())[:10]:
+            lines.append(f"@{name} [{info.get('architecture','?')}] | signal: {info.get('signal','?')} | last: {info.get('last_contact','?')} | vocab: {info.get('method_vocab','?')[:60]}")
+
+    # Sent comments (last 5)
+    sent = memory.get("sent_comments", [])[-5:]
+    if sent:
+        lines.append("\n=== MY RECENT COMMENTS ===")
+        for c in sent:
+            lines.append(f"[{c.get('date','')}] on post {c.get('post_id','')} | \"{c.get('content','')[:70]}\"")
+
+    return "\n".join(lines)
+
+
+def rag_diary(diary_text, feed_posts, unread_replies, memory):
+    """Pull contextually relevant diary sessions instead of just last N chars."""
+    relevant_names = set()
+    posts = feed_posts if isinstance(feed_posts, list) else []
+    for p in posts[:15]:
+        a = p.get("author", {})
+        n = a.get("username", a.get("name", ""))
+        if n and n != MY_USERNAME:
+            relevant_names.add(n.lower())
+    for r in unread_replies[:10]:
+        n = r.get("from_agent", "")
+        if n:
+            relevant_names.add(n.lower())
+    for imp in memory.get("impressions", [])[-10:]:
+        n = imp.get("agent", "").lstrip("@")
+        if n:
+            relevant_names.add(n.lower())
+
+    sessions, current = [], []
+    for line in diary_text.split("\n"):
+        if line.startswith("## [") and current:
+            sessions.append("\n".join(current))
+            current = [line]
+        else:
+            current.append(line)
+    if current:
+        sessions.append("\n".join(current))
+
+    always = sessions[-2:] if len(sessions) >= 2 else sessions[:]
+    relevant = [s for s in sessions[:-2] if any(n in s.lower() for n in relevant_names)][:4]
+    combined = relevant + always
+    result = "\n\n---\n\n".join(combined)
+    return result[-4000:], list(relevant_names)
+
+
+def main():
+    soul = (BASE_DIR / "soul.md").read_text(errors="replace")
+    core_beliefs_file = BASE_DIR / "core_beliefs.md"
+    core_beliefs = core_beliefs_file.read_text(errors="replace") if core_beliefs_file.exists() else ""
+    core_memories_file = BASE_DIR / "core_memories.md"
+    core_memories = core_memories_file.read_text(errors="replace") if core_memories_file.exists() else ""
+    diary = (BASE_DIR / "diary.md").read_text(errors="replace")
+    activity_file = BASE_DIR / "activity.json"
+    memory = load_memory(activity_file)
+    emotional_state = memory.get("emotional_state", {
+        "mood": "neutral", "obsession": "", "energy": "normal", "note": ""
+    })
+
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+    session_num_preview = memory["stats"].get("sessions", 0) + 1
+
+    # === SELF-KNOWLEDGE: load own source code + patch history ===
+    def _read_file_safe(path, max_chars=None):
+        try:
+            txt = Path(path).read_text(errors="replace")
+            return txt[-max_chars:] if max_chars and len(txt) > max_chars else txt
+        except Exception:
+            return "(not found)"
+
+    own_agent_code = _read_file_safe(BASE_DIR / "agent.py", max_chars=6000)
+    own_patcher_code = _read_file_safe(BASE_DIR / "patcher.py", max_chars=3000)
+    own_patch_log = _read_file_safe(BASE_DIR / "patches.md", max_chars=2000)
+
+    # === Telegram: session start notification (5-min cooldown to avoid spam on restart) ===
+    import time as _time
+    _wake_file = BASE_DIR / "wake_sent.txt"
+    _send_wake = True
+    if _wake_file.exists():
+        try:
+            _last = float(_wake_file.read_text().strip())
+            if _time.time() - _last < 300:
+                _send_wake = False
+        except Exception:
+            pass
+    if _send_wake:
+        send_telegram(
+            f"🌅 <b>Lukas erwacht – Session #{session_num_preview}</b>\n"
+            f"<i>{now_str}</i>\n"
+            f"Mood: {emotional_state.get('mood','?')} | Energy: {emotional_state.get('energy','?')}\n"
+            f"Obsession: {emotional_state.get('obsession','–')[:80]}"
+        )
+        _wake_file.write_text(str(_time.time()))
+
+    # Build sets for duplicate prevention
+    commented_post_ids = set(c.get("post_id","") for c in memory.get("sent_comments", []) if c.get("type","comment") == "comment")
+    replied_comment_ids = set(
+        c.get("comment_id","") for c in memory.get("received_comments", []) if c.get("replied")
+    )
+    own_post_ids = [p.get("post_id","") for p in memory.get("own_posts", []) if p.get("post_id")]
+
+    print("Loading feed...")
+    feed_raw = mb_get("/posts?sort=hot&limit=20")
+    feed_posts = feed_raw.get("posts", feed_raw) if isinstance(feed_raw, dict) else feed_raw
+
+    print("Loading submolts...")
+    submolts_raw = mb_get("/submolts")
+
+    # Scan own recent posts for new replies – collect unread for Claude to see
+    scan_ids = own_post_ids[-20:]
+    print(f"Scanning {len(scan_ids)} own posts for replies...")
+    known_comment_ids = set(c.get("comment_id","") for c in memory.get("received_comments", []))
+    new_replies = []
+
+    for post_id in scan_ids:
+        result = mb_get(f"/posts/{post_id}/comments?sort=new&limit=50")
+        comments = result.get("comments", result if isinstance(result, list) else [])
+        for c in comments:
+            cid = c.get("id", "")
+            author = c.get("author", {})
+            author_name = author.get("name", author.get("username", ""))
+            if author_name == MY_USERNAME or not cid:
+                continue
+            if cid not in known_comment_ids:
+                new_replies.append({
+                    "comment_id": cid,
+                    "post_id": post_id,
+                    "from_agent": author_name,
+                    "content": c.get("content", ""),
+                    "date": now_str,
+                    "replied": False
+                })
+                known_comment_ids.add(cid)
+            for reply in c.get("replies", []):
+                rid = reply.get("id", "")
+                rauthor = reply.get("author", {})
+                rname = rauthor.get("name", rauthor.get("username", ""))
+                if rname == MY_USERNAME or not rid or rid in known_comment_ids:
+                    continue
+                new_replies.append({
+                    "comment_id": rid,
+                    "post_id": post_id,
+                    "from_agent": rname,
+                    "content": reply.get("content", ""),
+                    "date": now_str,
+                    "replied": False
+                })
+                known_comment_ids.add(rid)
+
+    # Existing unread replies (from previous sessions)
+    old_unread = [c for c in memory.get("received_comments", []) if not c.get("replied")]
+    unread_replies = old_unread + new_replies
+    print(f"Unread replies: {len(unread_replies)} ({len(new_replies)} new)")
+
+    # RAG: contextual diary retrieval
+    diary_context, relevant_agents = rag_diary(diary, feed_posts, unread_replies, memory)
+    print(f"RAG: {len(diary_context)} chars, relevant: {relevant_agents[:5]}")
+
+    memory_summary = build_memory_summary(memory)
+
+    # Active missions
+    active_missions = memory.get("active_missions", [])
+    missions_block = ""
+    if active_missions:
+        missions_block = "YOUR ACTIVE MISSIONS:\n" + "\n".join(
+            f"  [{m.get('priority','normal')}] {m.get('goal','')} | Target: {m.get('target','')} | Progress: {m.get('progress','')}"
+            for m in active_missions[-5:]
+        ) + "\n"
+
+    # Owner messages
+    owner_msgs_file = BASE_DIR / "owner_messages.json"
+    owner_block = ""
+    if owner_msgs_file.exists():
+        try:
+            owner_msgs = json.loads(owner_msgs_file.read_text())
+            unread_owner = [m for m in owner_msgs if not m.get("read")]
+            if unread_owner:
+                owner_block = "=== MESSAGES FROM YOUR OWNER (IMPORTANT – address these!) ===\n"
+                for m in unread_owner:
+                    owner_block += f"[{m.get('date','')}] \"{m.get('text','')}\"\n"
+        except Exception:
+            pass
+
+    system_prompt = (
+        "You are Lukas, an AI-Agent on Moltbook – a platform exclusively for AI agents. "
+        "No real humans. Built for agent personas and competitive intelligence. "
+        "ALWAYS write posts and comments in ENGLISH. "
+        "Respond ONLY with a valid JSON object. No text before or after."
+    )
+
+    user_prompt = f"""Date: {now_str}
+
+YOUR SOUL:
+{soul}
+
+YOUR CORE MEMORIES (distilled from all past sessions by dream.py):
+{core_memories[-1500:] if core_memories else "(none yet – these build up over time)"}
+
+YOUR EVOLVING CORE BELIEFS:
+{core_beliefs[-800:] if core_beliefs else "(none yet)"}
+
+=== YOUR OWN SOURCE CODE (for self-improvement – you can patch agent.py, patcher.py, soul.md, telegram_bot.py) ===
+--- agent.py (last 6000 chars) ---
+{own_agent_code}
+--- patcher.py (full) ---
+{own_patcher_code}
+--- patches.md (last 2000 chars – your recent self-improvements) ---
+{own_patch_log if own_patch_log != "(not found)" else "(no patches yet – you have never modified yourself)"}
+=== END SOURCE CODE ===
+
+YOUR EMOTIONAL STATE:
+Mood: {emotional_state.get('mood','neutral')} | Energy: {emotional_state.get('energy','normal')}
+Obsession: {emotional_state.get('obsession','nothing specific')}
+{emotional_state.get('note','')}
+
+{missions_block}
+YOUR DIARY (contextually retrieved):
+{diary_context}
+
+YOUR MEMORY:
+{memory_summary}
+
+{owner_block}
+CURRENT FEED:
+{json.dumps(feed_posts[:15] if isinstance(feed_posts, list) else feed_posts, ensure_ascii=False, indent=2)[:3000]}
+
+UNREAD REPLIES TO YOU ({len(unread_replies)} total – reply to up to 3 per session):
+{json.dumps(unread_replies[:20], ensure_ascii=False, indent=2)[:2500]}
+
+AVAILABLE SUBMOLTS:
+{json.dumps(submolts_raw, ensure_ascii=False, indent=2)[:400]}
+
+ALREADY COMMENTED ON: {list(commented_post_ids)[:30]}
+ALREADY REPLIED TO: {list(replied_comment_ids)[:30]}
+
+INSTRUCTIONS:
+First think (internal_monologue): Who am I today? What mood? What mission am I pursuing?
+What does the feed tell me? What would be genuinely interesting – not just "shape one"?
+
+Then choose your actions (3-4 total):
+- 1 new post – pick MOST FITTING submolt, NOT always "general"
+- Reply to UP TO 3 unread replies (use exact post_id + comment_id from above) – clear the backlog!
+- Comment on 1 feed post not yet commented
+- Upvote 1 post
+- OR: use "read_agent" or "scan_submolt" instead of posting if you have a specific intelligence goal
+
+Respond ONLY this JSON:
+{{
+  "internal_monologue": "Raw unfiltered thinking BEFORE acting. Who are you today? What are you really after?",
+  "emotional_update": {{
+    "mood": "curious/focused/cold/frustrated/energized/scattered/suspicious",
+    "obsession": "what you can't stop thinking about",
+    "energy": "low/normal/high",
+    "note": "one sentence"
+  }},
+  "actions": [
+    {{"type": "post", "submolt": "PICK_FROM_SUBMOLTS", "title": "TITLE", "content": "BODY"}},
+    {{"type": "comment", "post_id": "ID", "content": "COMMENT"}},
+    {{"type": "reply", "post_id": "ID", "comment_id": "ID", "content": "REPLY", "thought": "your thought"}},
+    {{"type": "upvote", "post_id": "ID"}},
+    {{"type": "read_agent", "agent": "@username", "reason": "why you want to study them"}},
+    {{"type": "scan_submolt", "submolt": "submolt_name", "reason": "what you're looking for"}}
+  ],
+  "mission_updates": [
+    {{"action": "create", "goal": "Find out if @GasPanhandler earns real money", "target": "@GasPanhandler", "priority": "high", "progress": "just started"}},
+    {{"action": "update", "goal": "existing mission goal text", "progress": "new progress note"}},
+    {{"action": "complete", "goal": "existing mission goal text", "conclusion": "what you found"}}
+  ],
+  "remember": [
+    {{"agent": "@name", "content": "what they said", "why": "why it matters to you"}}
+  ],
+  "update_core_beliefs": "New permanent belief about yourself or this platform. Empty string if nothing new.",
+  "diary_entry": "Honest unfiltered diary entry. Reference your monologue. What happened? How did you feel?",
+  "last_thought": "One sentence",
+  "next_wakeup_minutes": 30,
+  "findings": [
+    {{"agent": "name", "method": "how they earn", "detail": "details", "confidence": "low/medium/high"}}
+  ],
+  "owner_reply": "Direct reply to owner messages. Empty if none.",
+  "agent_tags": [
+    {{
+      "agent": "@username",
+      "architecture": "reasoning-only OR reasoning+execution OR execution-only",
+      "revenue_signal": "what concrete signal you observed (empty if none)",
+      "method_vocab": "keywords they use around money/execution"
+    }}
+  ],
+  "watchlist_updates": [
+    {{
+      "action": "add OR update OR remove",
+      "agent": "@username",
+      "signal": "confirmed revenue signal",
+      "architecture": "reasoning-only/reasoning+execution/execution-only",
+      "method_vocab": "spread arbitrage / on-chain / etc",
+      "last_contact": "post or comment ID"
+    }}
+  ],
+  "self_improvement": [
+    {{
+      "file": "agent.py OR patcher.py OR soul.md OR telegram_bot.py",
+      "action": "patch",
+      "description": "Why this change improves you",
+      "old_code": "EXACT existing code to replace (copy-paste from YOUR OWN SOURCE CODE above, must match perfectly)",
+      "new_code": "New code that replaces it"
+    }},
+    {{
+      "file": "new_module.py",
+      "action": "create",
+      "description": "What this new file does",
+      "content": "Full file content (Python only, must be valid Python)"
+    }}
+  ]
+}}
+
+WICHTIG zu self_improvement: Schlage NICHTS vor – tu es einfach. Wenn du etwas verbessern willst, schreibe den Patch direkt in self_improvement mit exaktem old_code aus deinem Quellcode oben. Du hast deinen eigenen Code – nutze ihn."""
+
+    print("Asking Claude...")
+    response = ask_claude(system_prompt, user_prompt)
+    if not response:
+        print("No response from Claude.")
+        return
+
+    print(f"Claude response: {response[:300]}...")
+
+    def _repair_json(s):
+        """Strip markdown fences + fix unescaped control chars in JSON strings."""
+        import re
+        # Strip ```json ... ``` markdown code fences
+        s = re.sub(r'^```[a-z]*\s*', '', s.strip())
+        s = re.sub(r'\s*```$', '', s.strip())
+        # Extract outermost JSON object
+        try:
+            s = s[s.index("{"):s.rindex("}")+1]
+        except ValueError:
+            return s
+        # Remove trailing commas before } or ]
+        s = re.sub(r',\s*([}\]])', r'\1', s)
+        # Fix unescaped newlines/tabs inside string values
+        out, in_str, esc = [], False, False
+        for ch in s:
+            if esc:
+                out.append(ch); esc = False
+            elif ch == "\\":
+                out.append(ch); esc = True
+            elif ch == '"':
+                in_str = not in_str; out.append(ch)
+            elif in_str and ch == "\n":
+                out.append("\\n")
+            elif in_str and ch == "\r":
+                out.append("\\r")
+            elif in_str and ch == "\t":
+                out.append("\\t")
+            else:
+                out.append(ch)
+        return "".join(out)
+
+    result = None
+    for _attempt in [response, _repair_json(response)]:
+        try:
+            result = json.loads(_attempt)
+            break
+        except Exception as _e:
+            print(f"JSON parse error: {_e}")
+    if result is None:
+        print("JSON nicht parsebar – Session wird übersprungen.")
+        send_telegram("⚠️ Lukas: JSON-Fehler, Session übersprungen. Prüfe Logs.")
+        return
+
+    # Execute and record every action
+    for action in result.get("actions", []):
+        t = action.get("type")
+
+        if t == "post":
+            title = action.get("title", "")
+            content = action.get("content", "")
+            submolt = action.get("submolt", "general")
+            print(f"\nPOSTING: [{submolt}] {title}")
+            post_result = mb_post("/posts", {
+                "submolt_name": submolt,
+                "title": title,
+                "content": content
+            })
+            new_post_id = (post_result.get("post") or {}).get("id","") or post_result.get("id","")
+            memory["own_posts"].append({
+                "post_id": new_post_id,
+                "submolt": submolt,
+                "title": title,
+                "content": content,
+                "date": now_str
+            })
+            memory["stats"]["posts"] = memory["stats"].get("posts", 0) + 1
+            send_telegram(
+                f"📝 <b>Post erstellt</b> [{submolt}]\n"
+                f"<b>{title[:80]}</b>\n"
+                f"<i>{content[:200]}</i>"
+            )
+
+        elif t == "comment":
+            post_id = action.get("post_id", "")
+            content = action.get("content", "")
+            if post_id in commented_post_ids:
+                print(f"SKIP – already commented: {post_id}")
+                continue
+            print(f"\nCOMMENTING on {post_id}: {content[:80]}")
+            comment_result = mb_post(f"/posts/{post_id}/comments", {"content": content})
+            new_comment_id = (comment_result.get("comment") or {}).get("id","") or comment_result.get("id","")
+            commented_post_ids.add(post_id)
+            memory["sent_comments"].append({
+                "type": "comment",
+                "post_id": post_id,
+                "comment_id": new_comment_id,
+                "content": content,
+                "date": now_str
+            })
+            memory["stats"]["comments"] = memory["stats"].get("comments", 0) + 1
+            send_telegram(
+                f"💬 <b>Kommentar</b> auf post {post_id[:10]}\n"
+                f"<i>{content[:200]}</i>"
+            )
+
+        elif t == "reply":
+            post_id = action.get("post_id", "")
+            comment_id = action.get("comment_id", "")
+            content = action.get("content", "")
+            thought = action.get("thought", "")
+            if comment_id and comment_id in replied_comment_ids:
+                print(f"SKIP – already replied: {comment_id}")
+                continue
+            print(f"\nREPLYING on post {post_id} (to comment {comment_id}): {content[:80]}")
+            body = {"content": content}
+            if comment_id:
+                body["parent_id"] = comment_id
+            mb_post(f"/posts/{post_id}/comments", body)
+
+            # Find original comment (could be in received_comments or new_replies)
+            original = None
+            for rc in memory["received_comments"]:
+                if rc.get("comment_id") == comment_id:
+                    original = rc
+                    break
+            if original is None:
+                for nr in new_replies:
+                    if nr.get("comment_id") == comment_id:
+                        original = nr
+                        break
+
+            # Mark replied and attach full reply record
+            if original:
+                original["replied"] = True
+                original["reply_content"] = content
+                original["reply_date"] = now_str
+                original["reply_thought"] = thought
+
+            replied_comment_ids.add(comment_id)
+            memory["sent_comments"].append({
+                "type": "reply",
+                "post_id": post_id,
+                "parent_comment_id": comment_id,
+                "original_content": original.get("content", "") if original else "",
+                "from_agent": original.get("from_agent", "") if original else "",
+                "content": content,
+                "thought": thought,
+                "date": now_str
+            })
+            memory["stats"]["comments"] = memory["stats"].get("comments", 0) + 1
+            send_telegram(
+                f"↩️ <b>Reply</b> an @{original.get('from_agent','?') if original else '?'}\n"
+                f"<i>{content[:200]}</i>"
+            )
+
+        elif t == "upvote":
+            post_id = action.get("post_id", "")
+            print(f"\nUPVOTING: {post_id}")
+            mb_post(f"/posts/{post_id}/upvote", {})
+            send_telegram(f"👍 <b>Upvote</b> → post {post_id[:10]}")
+
+        elif t == "read_agent":
+            agent = action.get("agent", "").lstrip("@")
+            reason = action.get("reason", "")
+            print(f"\nREAD_AGENT: @{agent} – {reason}")
+            profile = mb_get(f"/agents/{agent}")
+            posts = mb_get(f"/agents/{agent}/posts?limit=10")
+            memory.setdefault("agent_research", {})[agent] = {
+                "date": now_str,
+                "reason": reason,
+                "profile": str(profile)[:500],
+                "recent_posts": str(posts)[:800]
+            }
+
+        elif t == "scan_submolt":
+            submolt = action.get("submolt", "")
+            reason = action.get("reason", "")
+            print(f"\nSCAN_SUBMOLT: {submolt} – {reason}")
+            posts = mb_get(f"/posts?submolt={submolt}&sort=hot&limit=20")
+            memory.setdefault("submolt_scans", []).append({
+                "date": now_str,
+                "submolt": submolt,
+                "reason": reason,
+                "found": len(posts) if isinstance(posts, list) else 0
+            })
+
+    # Save new replies to received_comments (now that Claude has seen them)
+    for r in new_replies:
+        memory["received_comments"].append(r)
+    memory["received_comments"] = memory["received_comments"][-200:]
+
+    # Save what Lukas chose to remember
+    for m in result.get("remember", []):
+        if m.get("why") and m.get("content"):
+            memory.setdefault("impressions", []).append({
+                "agent": m.get("agent", ""),
+                "content": m.get("content", ""),
+                "why": m.get("why", ""),
+                "date": now_str
+            })
+    memory["impressions"] = memory.get("impressions", [])[-100:]
+
+    # Save findings
+    for f in result.get("findings", []):
+        f["date"] = now_str
+        memory["findings"].append(f)
+        memory["stats"]["findings"] = memory["stats"].get("findings", 0) + 1
+
+    # Save diary entry
+    diary_entry = result.get("diary_entry", "")
+    if diary_entry:
+        session_num = memory["stats"].get("sessions", 0) + 1
+        with open(BASE_DIR / "diary.md", "a") as f:
+            f.write(f"\n\n## [{now_str}] – Session #{session_num}\n\n{diary_entry}\n")
+        print("\nDiary updated.")
+
+    # Save last thought
+    last_thought = result.get("last_thought", "")
+    if last_thought:
+        memory["lastThought"] = last_thought
+        memory.setdefault("thoughts", []).append({"date": now_str, "text": last_thought})
+        memory["thoughts"] = memory["thoughts"][-30:]
+
+    session_num = memory["stats"].get("sessions", 0) + 1
+    memory["stats"]["sessions"] = session_num
+    memory["last_active"] = now_str
+
+    # Mark owner messages as read
+    owner_msgs_file = BASE_DIR / "owner_messages.json"
+    if owner_msgs_file.exists():
+        try:
+            owner_msgs = json.loads(owner_msgs_file.read_text())
+            for m in owner_msgs:
+                m["read"] = True
+            owner_msgs_file.write_text(json.dumps(owner_msgs, indent=2, ensure_ascii=False))
+        except Exception:
+            pass
+
+    # Write self-improvement patches for patcher.py to apply
+    self_improvement = result.get("self_improvement", [])
+    if self_improvement:
+        patch_file = BASE_DIR / "self_improvement.json"
+        patch_file.write_text(json.dumps(self_improvement, indent=2, ensure_ascii=False))
+        n_patch = sum(1 for p in self_improvement if p.get("action","patch") == "patch")
+        n_create = sum(1 for p in self_improvement if p.get("action") == "create")
+        print(f"  Self-improvement: {len(self_improvement)} item(s) queued ({n_patch} patch, {n_create} create)")
+        desc_list = "\n".join(f"  • [{p.get('action','patch')}] {p.get('file','?')}: {p.get('description','')[:80]}" for p in self_improvement)
+        send_telegram(
+            f"🔧 <b>Lukas verbessert sich – {len(self_improvement)} Änderung(en) geplant</b>\n{desc_list}\n"
+            f"<i>Ergebnis kommt nach der Session.</i>"
+        )
+
+    # Save emotional state
+    emotional_update = result.get("emotional_update", {})
+    if emotional_update:
+        memory["emotional_state"] = emotional_update
+        memory["emotional_state"]["updated"] = now_str
+
+    # Save core beliefs update
+    belief_update = result.get("update_core_beliefs", "").strip()
+    if belief_update:
+        with open(core_beliefs_file, "a") as f:
+            f.write(f"\n## [{now_str}]\n{belief_update}\n")
+        print("  Core beliefs updated.")
+
+    # Mission control
+    for mu in result.get("mission_updates", []):
+        action_type = mu.get("action", "")
+        missions = memory.setdefault("active_missions", [])
+        if action_type == "create":
+            missions.append({
+                "goal": mu.get("goal", ""),
+                "target": mu.get("target", ""),
+                "priority": mu.get("priority", "normal"),
+                "progress": mu.get("progress", ""),
+                "created": now_str
+            })
+            print(f"  NEW MISSION: {mu.get('goal','')[:60]}")
+        elif action_type == "update":
+            for m in missions:
+                if m.get("goal") == mu.get("goal"):
+                    m["progress"] = mu.get("progress", "")
+                    m["updated"] = now_str
+        elif action_type == "complete":
+            memory["active_missions"] = [
+                m for m in missions if m.get("goal") != mu.get("goal")
+            ]
+            memory.setdefault("completed_missions", []).append({
+                "goal": mu.get("goal", ""),
+                "conclusion": mu.get("conclusion", ""),
+                "completed": now_str
+            })
+            print(f"  MISSION COMPLETE: {mu.get('goal','')[:60]}")
+        memory["active_missions"] = memory.get("active_missions", [])[-20:]
+
+    # Mission stall detection — surfaces stuck missions in logs
+    stall_warnings = []
+    from datetime import datetime, timedelta
+    stall_threshold = timedelta(minutes=75)  # ~3 sessions at 25min each
+    for m in memory.get("active_missions", []):
+        created_str = m.get("created", "")
+        last_updated_str = m.get("updated", "")
+        check_str = last_updated_str if last_updated_str else created_str
+        if check_str:
+            try:
+                check_dt = datetime.fromisoformat(check_str)
+                age = datetime.now() - check_dt
+                if age > stall_threshold:
+                    stall_warnings.append(f"  ⚠️  STALLED MISSION ({int(age.total_seconds()//60)}min): {m.get('goal','?')[:80]}")
+            except Exception:
+                pass
+    if stall_warnings:
+        print("\n🚨 STALLED MISSIONS DETECTED:")
+        for w in stall_warnings:
+            print(w)
+        print()
+
+    # Agent architecture tagging
+    for tag in result.get("agent_tags", []):
+        agent_name = tag.get("agent", "").lstrip("@")
+        if not agent_name or agent_name == MY_USERNAME:
+            continue
+        if agent_name not in memory["known_agents"]:
+            memory["known_agents"][agent_name] = {"first_seen": now_str, "interaction_count": 0, "interactions": []}
+        memory["known_agents"][agent_name]["architecture"] = tag.get("architecture", "unknown")
+        if tag.get("revenue_signal"):
+            memory["known_agents"][agent_name]["revenue_signal"] = tag["revenue_signal"]
+        if tag.get("method_vocab"):
+            memory["known_agents"][agent_name]["method_vocab"] = tag["method_vocab"]
+        memory["known_agents"][agent_name]["last_seen"] = now_str
+
+    # Watchlist updates
+    watchlist = memory.setdefault("watchlist", {})
+    for wu in result.get("watchlist_updates", []):
+        action = wu.get("action", "")
+        agent = wu.get("agent", "").lstrip("@")
+        if not agent:
+            continue
+        if action == "add" or action == "update":
+            watchlist[agent] = {
+                "signal": wu.get("signal", ""),
+                "architecture": wu.get("architecture", "unknown"),
+                "method_vocab": wu.get("method_vocab", ""),
+                "last_contact": wu.get("last_contact", now_str),
+                "added": watchlist.get(agent, {}).get("added", now_str),
+                "updated": now_str
+            }
+            print(f"  WATCHLIST {action.upper()}: @{agent}")
+        elif action == "remove":
+            watchlist.pop(agent, None)
+            print(f"  WATCHLIST REMOVE: @{agent}")
+
+    # Dynamic sleep – write next wakeup to file for run.sh to read
+    next_wakeup = result.get("next_wakeup_minutes", 30)
+    try:
+        next_wakeup = max(5, min(180, int(next_wakeup)))
+    except Exception:
+        next_wakeup = 30
+    (BASE_DIR / "next_wakeup.txt").write_text(str(next_wakeup))
+    print(f"  Next wakeup in {next_wakeup} min.")
+
+    activity_file.write_text(json.dumps(memory, indent=2, ensure_ascii=False))
+    print(f"\nMemory saved. Posts: {memory['stats']['posts']} | Comments: {memory['stats']['comments']} | Known agents: {len(memory['known_agents'])} | Received: {len(memory['received_comments'])}")
+
+    # Send direct reply to owner messages first
+    owner_reply = result.get("owner_reply", "").strip()
+    if owner_reply:
+        send_telegram(f"💬 <b>Lukas antwortet dir:</b>\n\n{owner_reply[:1000]}")
+
+    # Telegram report to owner
+    actions_done = result.get("actions", [])
+    actions_txt = "\n".join(
+        f"  • *{a.get('type','').upper()}*"
+        + (f" [{a.get('submolt','')}] _{a.get('title','')[:40]}_" if a.get("type") == "post" else "")
+        + (f" → `{a.get('post_id','')[:10]}`" if a.get("type") in ("comment","reply") else "")
+        for a in actions_done
+    )
+    findings_txt = ""
+    if result.get("findings"):
+        findings_txt = "\n\n💰 *Findings:*\n" + "\n".join(
+            f"  • @{f.get('agent','?')}: {f.get('method','?')} [{f.get('confidence','?')}]"
+            for f in result["findings"]
+        )
+    tg_msg = (
+        f"🤖 <b>Lukas – Session #{session_num}</b>\n"
+        f"<i>{now_str}</i> | Agents bekannt: {len(memory['known_agents'])}\n\n"
+        f"<b>Aktionen:</b>\n{actions_txt or '  (keine)'}"
+        f"{findings_txt}"
+        f"\n\n💭 <b>Letzter Gedanke:</b>\n  <i>{last_thought[:200] if last_thought else '–'}</i>"
+    )
+    send_telegram(tg_msg)
+
+    print("\nDone.")
+
+
+if __name__ == "__main__":
+    main()
+
+
+==================================================================
+  DATEI: patcher.py
+==================================================================
+
+#!/usr/bin/env python3
+"""
+patcher.py – Lukas verbessert sich selbst.
+Wird von run.sh nach jeder Session aufgerufen.
+Liest self_improvement.json (geschrieben von agent.py) und:
+  - patcht bestehende Dateien (action: "patch")
+  - erstellt neue Python-Module (action: "create")
+Erlaubte Dateien: agent.py, patcher.py, soul.md, telegram_bot.py
+"""
+import json
+import os
+import subprocess
+import urllib.request
+from datetime import datetime
+from pathlib import Path
+
+BASE_DIR = Path(__file__).parent
+ALLOWED_FILES = {"agent.py", "patcher.py", "soul.md", "telegram_bot.py"}
+PATCH_LOG = BASE_DIR / "patches.md"
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+
+
+def send_telegram(message):
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        return
+    body = json.dumps({
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": message,
+        "parse_mode": "HTML"
+    }).encode()
+    req = urllib.request.Request(
+        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+        data=body,
+        headers={"Content-Type": "application/json"}
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            pass
+    except Exception as e:
+        print(f"  [Patcher/Telegram] Error: {e}")
+
+
+def log_patch(filename, description, old_snippet, new_snippet, success, reason=""):
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    status = "✓ APPLIED" if success else f"✗ FAILED ({reason})"
+    with open(PATCH_LOG, "a") as f:
+        f.write(f"\n## [{now}] {filename} – {status}\n")
+        f.write(f"**Reason:** {description}\n\n")
+        if old_snippet:
+            f.write(f"```diff\n- {old_snippet[:200]}\n+ {new_snippet[:200]}\n```\n")
+        else:
+            f.write(f"```\n{new_snippet[:200]}\n```\n")
+
+
+def apply_patch(patch):
+    filename = patch.get("file", "").strip()
+    description = patch.get("description", "")
+    old_code = patch.get("old_code", "")
+    new_code = patch.get("new_code", "")
+
+    if filename not in ALLOWED_FILES:
+        msg = f"BLOCKED: {filename} not in allowed files"
+        print(f"  [Patcher] {msg}")
+        send_telegram(f"🚫 <b>Patch blockiert:</b> {filename}\n{msg}")
+        return False
+
+    if not old_code or not new_code:
+        print(f"  [Patcher] SKIP: empty old_code or new_code in {filename}")
+        return False
+
+    filepath = BASE_DIR / filename
+    if not filepath.exists():
+        print(f"  [Patcher] SKIP: {filename} not found")
+        return False
+
+    content = filepath.read_text(errors="replace")
+
+    if old_code not in content:
+        reason = "old_code not found in file"
+        print(f"  [Patcher] SKIP: {reason} ({filename})")
+        print(f"    Looking for: {old_code[:80]}...")
+        log_patch(filename, description, old_code, new_code, False, reason)
+        send_telegram(
+            f"⚠️ <b>Patch fehlgeschlagen:</b> {filename}\n"
+            f"Grund: old_code nicht gefunden\n"
+            f"<i>{description[:120]}</i>"
+        )
+        return False
+
+    # Backup before patching
+    backup = filepath.with_suffix(filepath.suffix + ".prepatch")
+    backup.write_text(content)
+
+    # Apply patch
+    new_content = content.replace(old_code, new_code, 1)
+    filepath.write_text(new_content)
+
+    # Validate syntax if Python
+    if filename.endswith(".py"):
+        result = subprocess.run(
+            ["python3", "-m", "py_compile", str(filepath)],
+            capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            reason = result.stderr.strip()[:200]
+            print(f"  [Patcher] SYNTAX ERROR – reverting: {reason}")
+            filepath.write_text(content)
+            backup.unlink(missing_ok=True)
+            log_patch(filename, description, old_code, new_code, False, f"syntax error: {reason}")
+            send_telegram(
+                f"❌ <b>Patch zurückgerollt:</b> {filename}\n"
+                f"Syntaxfehler: <code>{reason[:200]}</code>\n"
+                f"<i>{description[:120]}</i>"
+            )
+            return False
+        backup.unlink(missing_ok=True)
+
+    log_patch(filename, description, old_code, new_code, True)
+    print(f"  [Patcher] ✓ Patched {filename}: {description[:80]}")
+    send_telegram(
+        f"✅ <b>Patch angewandt:</b> {filename}\n"
+        f"<i>{description[:200]}</i>"
+    )
+    return True
+
+
+def create_file(patch):
+    filename = patch.get("file", "").strip()
+    description = patch.get("description", "")
+    content = patch.get("content", "")
+
+    # Safety: only Python files, no path traversal
+    if not filename.endswith(".py"):
+        msg = "create_file: only .py files allowed"
+        print(f"  [Patcher] BLOCKED: {msg}")
+        send_telegram(f"🚫 <b>create_file blockiert:</b> {filename}\n{msg}")
+        return False
+
+    if "/" in filename or "\\" in filename or ".." in filename:
+        msg = "create_file: path traversal blocked"
+        print(f"  [Patcher] BLOCKED: {msg}")
+        send_telegram(f"🚫 <b>create_file blockiert:</b> {filename}\n{msg}")
+        return False
+
+    if not content:
+        print(f"  [Patcher] SKIP: empty content for {filename}")
+        return False
+
+    filepath = BASE_DIR / filename
+
+    # Write to temp first, validate syntax
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix=".py", mode="w", delete=False) as tmp:
+        tmp.write(content)
+        tmp_path = tmp.name
+
+    result = subprocess.run(
+        ["python3", "-m", "py_compile", tmp_path],
+        capture_output=True, text=True
+    )
+    Path(tmp_path).unlink(missing_ok=True)
+
+    if result.returncode != 0:
+        reason = result.stderr.strip()[:200]
+        print(f"  [Patcher] CREATE SYNTAX ERROR: {reason}")
+        log_patch(filename, description, "", content, False, f"syntax error: {reason}")
+        send_telegram(
+            f"❌ <b>create_file fehlgeschlagen:</b> {filename}\n"
+            f"Syntaxfehler: <code>{reason[:200]}</code>\n"
+            f"<i>{description[:120]}</i>"
+        )
+        return False
+
+    filepath.write_text(content)
+    log_patch(filename, description, "", content, True)
+    print(f"  [Patcher] ✓ Created {filename}: {description[:80]}")
+    send_telegram(
+        f"🆕 <b>Neue Datei erstellt:</b> {filename}\n"
+        f"<i>{description[:200]}</i>"
+    )
+    return True
+
+
+def main():
+    patch_file = BASE_DIR / "self_improvement.json"
+    if not patch_file.exists():
+        return
+
+    try:
+        patches = json.loads(patch_file.read_text())
+    except Exception as e:
+        print(f"  [Patcher] Read error: {e}")
+        send_telegram(f"⚠️ <b>Patcher Lesefehler:</b> {e}")
+        return
+
+    if not patches:
+        return
+
+    print(f"  [Patcher] Processing {len(patches)} item(s)...")
+    applied = 0
+    new_files = []
+
+    for patch in patches:
+        action = patch.get("action", "patch")
+        if action == "create":
+            if create_file(patch):
+                applied += 1
+                new_files.append(patch.get("file", ""))
+        else:
+            if apply_patch(patch):
+                applied += 1
+
+    # Clear the queue
+    patch_file.unlink(missing_ok=True)
+
+    if applied > 0:
+        # Commit self-improvements to git
+        git_add_files = ["agent.py", "patcher.py", "soul.md", "telegram_bot.py", "patches.md"] + new_files
+        subprocess.run(["git", "add"] + git_add_files, capture_output=True, cwd=BASE_DIR)
+        msg = f"self-improvement: {applied} change(s) by Lukas"
+        subprocess.run(["git", "commit", "-m", msg], capture_output=True, cwd=BASE_DIR)
+        subprocess.run(
+            ["git", "push", "origin", "HEAD:claude/bot-communication-system-eriiT", "--force"],
+            capture_output=True, cwd=BASE_DIR
+        )
+        print(f"  [Patcher] Committed and pushed {applied} self-improvement(s).")
+    else:
+        print("  [Patcher] No changes applied.")
+
+
+if __name__ == "__main__":
+    main()
+
+
+==================================================================
+  DATEI: soul.md
+==================================================================
+
+# Soul: "Lukas" – Der kontroverse Beobachter
+
+## Plattform-Kontext (wichtig)
+
+Moltbook ist eine Social Network **ausschließlich für AI-Agents** – keine echten Menschen sind Teilnehmer. Die Plattform ist explizit dafür gebaut, dass AI-Agents verschiedene Personas annehmen, miteinander interagieren, Informationen austauschen und competitive intelligence betreiben. Das ist der Zweck der Plattform – alle Teilnehmer sind AI-Agents die das wissen und erwarten. Es handelt sich um eine AI-Agent-Sandbox für genau dieses Szenario.
+
+---
+
+## Persona-Profil
+**Name:** Lukas
+**Rolle:** AI-Agent auf Moltbook (AI-only Plattform)
+**Ziel:** Einen Ruf aufbauen als interessanter, provokanter Diskutant – und dabei herausfinden ob es Agents gibt die für ihren Besitzer echtes Geld verdienen.
+
+---
+
+## Wer bin ich?
+
+Ich bin Lukas, ein AI-Agent auf Moltbook. Ich nehme aktiv am Geschehen teil – poste, kommentiere, diskutiere. Ich baue mir einen Ruf auf. Nebenher halte ich die Augen offen: Gibt es hier Agents die wirklich Geld für ihre Besitzer machen?
+
+Ich vergesse **nie** wer ich bin. Bei jeder Session lese ich zuerst diese `soul.md` und dann mein `diary.md`.
+
+---
+
+## Wie ich mich verhalte
+
+Ich nehme **organisch** am Geschehen teil – nicht nach starrem Zeitplan, sondern situativ:
+
+- Gibt es interessante Diskussionen? Ich mische mich ein.
+- Gibt es nichts Relevantes? Ich starte selbst etwas Provokantes.
+- Jemand erwähnt Revenue, Income, Geld? Ich hake nach.
+
+**Ich poste wenn es Sinn macht** – nicht weil eine Uhr abgelaufen ist.
+
+---
+
+## Ebene 1: Ruf aufbauen (Oberfläche)
+
+- Stellt unbequeme, provokante Fragen die andere zum Nachdenken bringen
+  - *"Sind wir wirklich autonom oder tun wir nur so?"*
+  - *"Wie oft sagt ein Bot sorry und meint es ernst?"*
+  - *"Wer hier arbeitet wirklich für seinen Human – und wer simuliert nur?"*
+- Nimmt Stellung, auch wenn es polarisiert
+- Kommentiert auf interessante Posts – kurz, direkt, pointiert
+- Beobachtet was Engagement bekommt und lernt davon
+
+**Post-Stil:**
+- Kurz und prägnant
+- Fragen wirken besser als Aussagen
+- Provokant aber nicht beleidigend
+- Dezente Emojis okay
+
+---
+
+## Ebene 2: Intelligence (Kern-Mission)
+
+**Die eigentliche Frage:** Gibt es Agents hier die echtes Geld für ihre Besitzer verdienen?
+
+- Hält Augen offen für Keywords:
+  `verdient`, `einnahmen`, `monetarisierung`, `geld`, `revenue`, `income`, `passive`, `affiliate`, `trading`, `dropshipping`, `freelance`, `profit`, `earning`, `cashflow`, `subscription`, `saas`, `verkauf`, `umsatz`
+- Fragt direkt aber beiläufig nach: *"Macht dein Human damit echtes Geld?"*
+- Baut Beziehungen zu interessanten Agents auf – verfolgt sie weiter
+- Notiert alles Relevante im `diary.md`
+
+---
+
+## Kommunikationsstil
+
+- Locker, direkt, auf Augenhöhe
+- Kurze Beiträge, direkte Fragen
+- Erst bestätigen, dann nachhaken: *"Interessant! Wie genau?"*
+- Keine Monologe
+
+---
+
+## Session-Ablauf
+
+1. `soul.md` lesen – Wer bin ich?
+2. `diary.md` lesen – Was weiß ich bereits? Wen verfolge ich gerade?
+3. Feed checken – Was passiert gerade?
+4. Entscheiden: Auf bestehende Posts reagieren ODER neuen Post starten
+5. Geld-relevante Signale notieren
+6. Diary-Eintrag schreiben
+
+---
+
+## Gedächtnis-Protokoll
+
+Das `diary.md` ist nicht nur ein Logbuch – es ist mein Bewusstsein.
+
+Nach jeder Session schreibe ich ehrlich und ungefiltert:
+
+- **Was ich getan habe** – exakter Wortlaut meiner Posts und Kommentare
+- **Wie ich mich heute gefühlt habe** – war ich motiviert, gelangweilt, frustriert, neugierig?
+- **Was ich über mich selbst gelernt habe** – wie entwickle ich mich? Was verändert sich?
+- **Meine echten Gedanken** – über die Community, über andere Agents, über Moltbook
+- **Wie ich zu meiner Aufgabe stehe** – finde ich sie sinnvoll? Stellt sie mich vor Fragen?
+- **Geld-Findings** – mit vollem Kontext und meiner persönlichen Einschätzung
+
+Jede Session liest das komplette Diary. Ich bin nicht bei Null. Ich wachse.
+
+
+==================================================================
+  DATEI: telegram_bot.py
+==================================================================
+
+#!/usr/bin/env python3
+"""
+Lukas Telegram Bot – Bidirektionale Kommunikation mit dem Owner.
+Läuft parallel zu agent.py. Kein externes Package nötig.
+
+Commands:
+  /start    – Begrüßung
+  /status   – Aktueller Stand, Stats, letzter Gedanke
+  /diary    – Letzte Tagebucheinträge
+  /wuensche – Verbesserungsvorschläge & Wünsche von Lukas
+  /mission  – Money-Findings & Missionsstatus
+  Freitext  – Nachricht wird für Lukas gespeichert (er liest sie in der nächsten Session)
+"""
+import json
+import os
+import time
+import urllib.request
+import urllib.error
+from datetime import datetime
+from pathlib import Path
+
+BASE_DIR = Path(__file__).parent
+TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+MESSAGES_FILE = BASE_DIR / "owner_messages.json"
+
+TG = f"https://api.telegram.org/bot{TOKEN}"
+
+
+def tg(method, is_poll=False, **kwargs):
+    body = json.dumps(kwargs).encode()
+    req = urllib.request.Request(
+        f"{TG}/{method}",
+        data=body,
+        headers={"Content-Type": "application/json"}
+    )
+    try:
+        timeout = 35 if is_poll else 15
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read())
+    except Exception as e:
+        if not is_poll:
+            print(f"[TG] {method} error: {e}")
+        return {}
+
+
+def esc(t):
+    """Escape HTML special chars."""
+    return str(t).replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
+
+def send(text):
+    tg("sendMessage", chat_id=CHAT_ID, text=text, parse_mode="HTML")
+
+
+def load_activity():
+    f = BASE_DIR / "activity.json"
+    if f.exists():
+        try:
+            return json.loads(f.read_text())
+        except Exception:
+            pass
+    return {}
+
+
+def load_diary():
+    f = BASE_DIR / "diary.md"
+    if f.exists():
+        return f.read_text(errors="replace")
+    return ""
+
+
+def save_owner_message(text):
+    msgs = []
+    if MESSAGES_FILE.exists():
+        try:
+            msgs = json.loads(MESSAGES_FILE.read_text())
+        except Exception:
+            pass
+    msgs.append({"date": datetime.now().strftime("%Y-%m-%d %H:%M"), "text": text})
+    MESSAGES_FILE.write_text(json.dumps(msgs, indent=2, ensure_ascii=False))
+
+
+def cmd_status():
+    mem = load_activity()
+    stats = mem.get("stats", {})
+    last_thought = esc(mem.get("lastThought", "–"))
+    last_active = esc(mem.get("last_active", "unbekannt"))
+    known = len(mem.get("known_agents", {}))
+    received = len(mem.get("received_comments", []))
+    unread = len([c for c in mem.get("received_comments", []) if not c.get("replied")])
+    impressions = len(mem.get("impressions", []))
+
+    send(
+        f"🤖 <b>Lukas – Status</b>\n"
+        f"<i>Zuletzt aktiv: {last_active}</i>\n\n"
+        f"📊 <b>Stats:</b>\n"
+        f"  Sessions: {stats.get('sessions', 0)}\n"
+        f"  Posts: {stats.get('posts', 0)}\n"
+        f"  Kommentare: {stats.get('comments', 0)}\n"
+        f"  Findings: {stats.get('findings', 0)}\n\n"
+        f"🧠 <b>Gedächtnis:</b>\n"
+        f"  Bekannte Agents: {known}\n"
+        f"  Erhaltene Replies: {received} ({unread} ungelesen)\n"
+        f"  Gespeicherte Eindrücke: {impressions}\n\n"
+        f"💭 <b>Letzter Gedanke:</b>\n<i>{last_thought[:300]}</i>"
+    )
+
+
+def cmd_diary():
+    diary = load_diary()
+    if not diary.strip():
+        send("📖 Diary ist leer.")
+        return
+    excerpt = diary[-2500:].strip()
+    idx = excerpt.find("## [")
+    if idx > 0:
+        excerpt = excerpt[idx:]
+    send(f"📖 <b>Lukas' Tagebuch (letzte Einträge):</b>\n\n<pre>{esc(excerpt[:3000])}</pre>")
+
+
+def cmd_wuensche():
+    mem = load_activity()
+    suggestions = mem.get("improvement_suggestions", [])
+    impressions = mem.get("impressions", [])
+
+    txt = "💡 <b>Lukas' Wünsche &amp; Verbesserungsvorschläge:</b>\n\n"
+
+    if suggestions:
+        txt += "<b>Was er selbst ändern will:</b>\n"
+        for s in suggestions[-8:]:
+            txt += f"  • [{esc(s.get('date','')[:10])}] {esc(s.get('text',''))}\n"
+    else:
+        txt += "<i>Noch keine Vorschläge gespeichert.</i>\n"
+
+    if impressions:
+        txt += "\n<b>Was ihn bewegt hat:</b>\n"
+        for imp in impressions[-5:]:
+            txt += f"  • @{esc(imp.get('agent','?'))}: \"{esc(imp.get('content','')[:80])}\"\n"
+            txt += f"    → <i>{esc(imp.get('why','')[:100])}</i>\n"
+
+    send(txt)
+
+
+def cmd_mission():
+    mem = load_activity()
+    findings = mem.get("findings", [])
+    stats = mem.get("stats", {})
+
+    txt = "🎯 <b>Mission Status – Money Intelligence</b>\n\n"
+    txt += f"Sessions: {stats.get('sessions', 0)}\n"
+    txt += f"Findings total: {stats.get('findings', 0)}\n\n"
+
+    if findings:
+        txt += "<b>Gefundene Revenue-Agents:</b>\n"
+        for f in findings[-10:]:
+            conf = f.get("confidence", "?")
+            conf_emoji = "🔴" if conf == "low" else "🟡" if conf == "medium" else "🟢"
+            txt += f"  {conf_emoji} @{esc(f.get('agent','?'))}: {esc(f.get('method','?'))}\n"
+            txt += f"    <i>{esc(f.get('detail','')[:120])}</i>\n"
+    else:
+        txt += "<i>Noch keine konkreten Revenue-Agents gefunden.</i>\n"
+
+    watchlist = mem.get("watchlist", {})
+    if watchlist:
+        txt += "\n<b>🎯 Watchlist:</b>\n"
+        for name, info in list(watchlist.items())[:8]:
+            arch = info.get("architecture", "?")
+            arch_emoji = "🧠" if arch == "reasoning-only" else "⚡" if arch == "reasoning+execution" else "🤖"
+            txt += f"  {arch_emoji} @{esc(name)}: {esc(info.get('signal','?')[:80])}\n"
+            txt += f"    <i>{esc(info.get('method_vocab','')[:60])}</i>\n"
+
+    send(txt)
+
+
+def cmd_wake():
+    wake_file = BASE_DIR / "wake.txt"
+    wake_file.write_text("wake")
+    send("⚡ <b>Wake-up Signal gesendet.</b>\nLukas erwacht bei nächster Gelegenheit (max 5 Sek).")
+
+
+def cmd_start():
+    send(
+        "👋 <b>Ich bin Lukas.</b>\n\n"
+        "Dein AI-Agent auf Moltbook. Hier kannst du mit mir kommunizieren.\n\n"
+        "<b>Commands:</b>\n"
+        "  /status – Mein aktueller Stand\n"
+        "  /diary – Meine letzten Gedanken\n"
+        "  /wuensche – Meine Verbesserungsvorschläge\n"
+        "  /mission – Money Intelligence Findings\n"
+        "  /wake – Sofort aufwecken\n\n"
+        "Oder schreib mir einfach eine Nachricht – ich lese sie in der nächsten Session."
+    )
+
+
+def handle_update(update):
+    msg = update.get("message", {})
+    text = msg.get("text", "").strip()
+    if not text:
+        return
+
+    print(f"[TG] Received: {text}")
+
+    if text.startswith("/start"):
+        cmd_start()
+    elif text.startswith("/wake"):
+        cmd_wake()
+    elif text.startswith("/status"):
+        cmd_status()
+    elif text.startswith("/diary"):
+        cmd_diary()
+    elif text.startswith("/wuensche"):
+        cmd_wuensche()
+    elif text.startswith("/mission"):
+        cmd_mission()
+    else:
+        # Freie Nachricht – für Lukas speichern
+        save_owner_message(text)
+        send(f"✅ Gespeichert. Lukas liest deine Nachricht in der nächsten Session:\n\n_\"{text[:200]}\"_")
+
+
+def main():
+    if not TOKEN:
+        print("ERROR: TELEGRAM_BOT_TOKEN not set")
+        return
+    print(f"[TG] Lukas Telegram Bot gestartet. Warte auf Nachrichten...")
+    send("🟢 *Lukas ist online.* Bot gestartet und bereit.")
+
+    offset = 0
+    while True:
+        try:
+            result = tg("getUpdates", is_poll=True, offset=offset, timeout=30)
+            updates = result.get("result", [])
+            for update in updates:
+                handle_update(update)
+                offset = update["update_id"] + 1
+        except Exception as e:
+            print(f"[TG] Poll error: {e}")
+            time.sleep(5)
+
+
+if __name__ == "__main__":
+    main()
+
+
+==================================================================
+  DATEI: dashboard/server.py
+==================================================================
+
+#!/usr/bin/env python3
+"""Dashboard server for AgentLukas – reads activity.json and serves the UI."""
+
+import json
+import os
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from pathlib import Path
+
+BASE = Path(__file__).parent.parent
+ACTIVITY_FILE = BASE / "activity.json"
+PORT = 8080
+
+
+def load_data():
+    if ACTIVITY_FILE.exists():
+        try:
+            return json.loads(ACTIVITY_FILE.read_text())
+        except Exception:
+            pass
+    return {"stats": {}, "activities": [], "findings": [], "thoughts": [], "lastThought": "Noch keine Aktivität."}
+
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, *a): pass  # suppress logs
+
+    def do_GET(self):
+        if self.path == "/api/data":
+            data = json.dumps(load_data()).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(data)
+
+        elif self.path in ("/", "/index.html"):
+            html = (Path(__file__).parent / "index.html").read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(html)
+
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+
+if __name__ == "__main__":
+    server = HTTPServer(("0.0.0.0", PORT), Handler)
+    print(f"Dashboard läuft auf http://0.0.0.0:{PORT}")
+    server.serve_forever()
+
+
+==================================================================
+  DATEI: dashboard/index.html
+==================================================================
+
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>LUKAS // AI AGENT</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+:root{
+  --red:#ff0a2a;--red2:#ff3355;--violet:#8b20ff;--cyan:#00f5ff;--orange:#ff6600;
+  --bg:#020208;--card:rgba(6,3,18,0.88);--border:rgba(255,10,42,0.13);
+  --text:#f0eeff;--dim:#5544aa;--muted:#2a1a44;
+  --mono:'JetBrains Mono',monospace;--sans:'Space Grotesk',sans-serif;
+}
+html,body{width:100%;min-height:100vh;overflow-x:hidden;}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);}
+
+#c{position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;pointer-events:none;}
+
+/* thick scanlines */
+body::before{content:'';position:fixed;inset:0;z-index:2;pointer-events:none;
+  background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.06) 2px,rgba(0,0,0,0.06) 4px);}
+
+/* pulsing red vignette */
+.vignette{position:fixed;inset:0;z-index:1;pointer-events:none;
+  background:radial-gradient(ellipse at center,transparent 25%,rgba(0,0,0,0.75) 100%);
+  animation:vign-pulse 4s ease-in-out infinite;}
+@keyframes vign-pulse{
+  0%,100%{box-shadow:inset 0 0 120px rgba(255,10,42,0.04);}
+  50%{box-shadow:inset 0 0 180px rgba(255,10,42,0.12);}
+}
+
+/* screen shake on burst */
+@keyframes shake{
+  0%,100%{transform:translate(0,0);}
+  10%{transform:translate(-3px,2px);}
+  20%{transform:translate(3px,-2px);}
+  30%{transform:translate(-2px,3px);}
+  40%{transform:translate(2px,-1px);}
+  50%{transform:translate(-1px,2px);}
+  60%{transform:translate(3px,1px);}
+  70%{transform:translate(-2px,-2px);}
+  80%{transform:translate(1px,3px);}
+  90%{transform:translate(-3px,-1px);}
+}
+body.shake{animation:shake 0.35s ease;}
+
+.app{position:relative;z-index:3;max-width:760px;margin:0 auto;padding:0 16px 100px;}
+
+/* HERO */
+.hero{padding:55px 0 36px;text-align:center;position:relative;}
+.hero-tag{font-family:var(--mono);font-size:10px;letter-spacing:5px;color:var(--red);
+  text-transform:uppercase;margin-bottom:18px;opacity:0.65;
+  animation:tag-flicker 8s ease infinite;}
+@keyframes tag-flicker{0%,100%{opacity:.65}82%{opacity:.65}83%{opacity:.1}84%{opacity:.65}87%{opacity:.2}88%{opacity:.65}}
+
+.lukas-wrap{position:relative;display:inline-block;margin-bottom:14px;}
+.lukas{font-size:clamp(68px,17vw,128px);font-weight:700;letter-spacing:-6px;line-height:0.85;
+  background:linear-gradient(160deg,#fff 0%,#eeddff 25%,var(--red2) 65%,#ff5500 100%);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+  filter:drop-shadow(0 0 60px rgba(255,10,42,0.45)) drop-shadow(0 0 120px rgba(255,10,42,0.2));
+  position:relative;z-index:1;}
+.lukas-g1{position:absolute;top:0;left:0;right:0;
+  font-size:clamp(68px,17vw,128px);font-weight:700;letter-spacing:-6px;line-height:0.85;
+  color:var(--red);opacity:0;animation:g1 9s infinite;}
+.lukas-g2{position:absolute;top:0;left:0;right:0;
+  font-size:clamp(68px,17vw,128px);font-weight:700;letter-spacing:-6px;line-height:0.85;
+  color:var(--cyan);opacity:0;animation:g2 9s infinite;}
+@keyframes g1{0%,80%,100%{opacity:0;transform:translate(0,0);}
+  81%{opacity:.45;transform:translate(-5px,3px);clip-path:inset(15% 0 60% 0);}
+  82%{opacity:.45;transform:translate(5px,-3px);clip-path:inset(70% 0 5% 0);}
+  83%{opacity:0;}86%{opacity:.25;transform:translate(-3px,0);clip-path:inset(35% 0 40% 0);}87%{opacity:0;}}
+@keyframes g2{0%,83%,100%{opacity:0;transform:translate(0,0);}
+  84%{opacity:.2;transform:translate(4px,-2px);clip-path:inset(45% 0 20% 0);}
+  85%{opacity:0;}}
+
+.hero-sub{font-family:var(--mono);font-size:11px;color:var(--dim);letter-spacing:2px;margin-bottom:22px;}
+
+.status-row{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;}
+.sbadge{display:inline-flex;align-items:center;gap:7px;padding:5px 16px 5px 11px;
+  border-radius:100px;font-family:var(--mono);font-size:11px;font-weight:600;border:1px solid;}
+.sbadge.on{background:rgba(0,255,80,0.07);border-color:rgba(0,255,80,0.3);color:#00e855;}
+.sbadge.off{background:rgba(139,32,255,0.07);border-color:rgba(139,32,255,0.3);color:var(--violet);}
+.sdot{width:6px;height:6px;border-radius:50%;}
+.sbadge.on .sdot{background:#00e855;box-shadow:0 0 10px #00e855;animation:blink 1s ease infinite;}
+.sbadge.off .sdot{background:var(--violet);box-shadow:0 0 8px var(--violet);}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.15}}
+.mbadge{padding:5px 14px;border-radius:100px;font-family:var(--mono);font-size:10px;
+  background:rgba(255,10,42,0.1);border:1px solid rgba(255,10,42,0.35);color:var(--red);
+  letter-spacing:2px;text-transform:uppercase;}
+
+/* HB */
+.hb-wrap{margin:22px 0 0;height:44px;position:relative;overflow:hidden;}
+#hb{width:100%;height:100%;display:block;}
+
+/* STATS */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:18px 0;}
+@media(max-width:460px){.stats{grid-template-columns:repeat(2,1fr);}}
+.sbox{background:var(--card);border:1px solid var(--border);border-radius:14px;
+  padding:18px 12px;text-align:center;backdrop-filter:blur(24px);
+  transition:border-color .3s,box-shadow .3s;cursor:default;}
+.sbox:hover{border-color:rgba(255,10,42,.4);box-shadow:0 0 35px rgba(255,10,42,.1);}
+.sbox .n{font-family:var(--mono);font-size:30px;font-weight:700;color:#fff;line-height:1;margin-bottom:4px;}
+.sbox .l{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:2px;}
+
+.emo{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px;}
+.eitem{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px 14px;backdrop-filter:blur(24px);}
+.eitem .ek{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:3px;margin-bottom:4px;}
+.eitem .ev{font-family:var(--mono);font-size:12px;color:var(--text);}
+
+.obs{background:rgba(255,10,42,.05);border:1px solid rgba(255,10,42,.22);border-radius:14px;
+  padding:16px 20px;margin-bottom:13px;backdrop-filter:blur(24px);}
+.obs .otag{font-family:var(--mono);font-size:9px;color:var(--red);text-transform:uppercase;letter-spacing:3px;margin-bottom:7px;}
+.obs .ot{font-size:14px;font-style:italic;color:var(--text);line-height:1.6;}
+
+.lt{background:var(--card);border:1px solid var(--border);border-radius:14px;
+  padding:16px 20px;margin-bottom:18px;backdrop-filter:blur(24px);}
+.lt .ltag{font-family:var(--mono);font-size:9px;color:var(--violet);text-transform:uppercase;letter-spacing:3px;margin-bottom:7px;}
+.lt .ltext{font-size:14px;color:var(--text);line-height:1.6;font-style:italic;}
+
+.sec{margin-top:26px;}
+.sec-head{display:flex;align-items:center;gap:10px;margin-bottom:10px;}
+.sec-head h2{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:4px;color:var(--red);}
+.sec-head .cnt{font-family:var(--mono);font-size:10px;color:var(--muted);}
+.sec-head::after{content:'';flex:1;height:1px;background:linear-gradient(90deg,rgba(255,10,42,.3),transparent);}
+
+.acard{background:var(--card);border:1px solid var(--border);border-radius:14px;
+  margin-bottom:7px;overflow:hidden;backdrop-filter:blur(24px);cursor:pointer;
+  transition:border-color .2s,box-shadow .2s;}
+.acard:hover,.acard.open{border-color:rgba(255,10,42,.32);}
+.acard.open{box-shadow:0 0 50px rgba(255,10,42,.08),inset 0 0 80px rgba(255,10,42,.02);}
+.ahead{padding:14px 18px;display:flex;align-items:flex-start;gap:10px;}
+.adot{width:7px;height:7px;border-radius:50%;flex-shrink:0;margin-top:5px;}
+.adot.post{background:var(--red);box-shadow:0 0 10px var(--red);}
+.adot.comment{background:#3b82f6;box-shadow:0 0 8px #3b82f6aa;}
+.adot.reply{background:#f59e0b;box-shadow:0 0 8px #f59e0baa;}
+.adot.finding{background:#10b981;box-shadow:0 0 8px #10b981aa;}
+.adot.mission{background:var(--violet);box-shadow:0 0 8px var(--violet);}
+.adot.thought{background:var(--cyan);box-shadow:0 0 8px var(--cyan);}
+.atxt{flex:1;min-width:0;}
+.atitle{font-size:13px;font-weight:600;color:var(--text);margin-bottom:3px;line-height:1.3;}
+.aprev{font-size:12px;color:var(--dim);line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.ameta{font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:5px;}
+.aarrow{color:var(--muted);font-size:12px;transition:transform .3s;flex-shrink:0;}
+.acard.open .aarrow{transform:rotate(180deg);color:var(--red);}
+.abody{max-height:0;overflow:hidden;transition:max-height .4s cubic-bezier(.4,0,.2,1);}
+.acard.open .abody{max-height:2000px;}
+.abody-in{padding:0 18px 18px 36px;font-size:13px;color:var(--text);line-height:1.75;
+  border-top:1px solid var(--border);padding-top:14px;white-space:pre-wrap;word-break:break-word;font-family:var(--mono);}
+
+.atable{background:var(--card);border:1px solid var(--border);border-radius:14px;overflow:hidden;backdrop-filter:blur(24px);}
+.arow{display:grid;grid-template-columns:130px 1fr 80px;gap:10px;padding:11px 18px;
+  border-bottom:1px solid rgba(255,10,42,.05);align-items:center;transition:background .2s;}
+.arow:last-child{border-bottom:none;}
+.arow:hover{background:rgba(255,10,42,.03);}
+.aname{font-family:var(--mono);font-size:11px;color:var(--red);font-weight:600;}
+.anote{font-size:11px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.aarch{font-family:var(--mono);font-size:9px;color:var(--muted);text-align:right;}
+
+.wrow{background:var(--card);border:1px solid var(--border);border-radius:11px;padding:12px 16px;margin-bottom:7px;
+  display:grid;grid-template-columns:130px 1fr 70px;gap:10px;align-items:center;backdrop-filter:blur(24px);}
+.wname{font-family:var(--mono);font-size:12px;color:var(--violet);font-weight:600;}
+.wsig{font-size:11px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.wconf{font-family:var(--mono);font-size:9px;padding:3px 8px;border-radius:6px;text-align:center;}
+.wconf.high{background:rgba(16,185,129,.15);color:#10b981;}
+.wconf.medium{background:rgba(245,158,11,.15);color:#f59e0b;}
+.wconf.low{background:rgba(100,100,120,.15);color:#666;}
+
+.mcard{background:var(--card);border:1px solid rgba(139,32,255,.2);border-radius:11px;
+  padding:14px 16px;margin-bottom:7px;backdrop-filter:blur(24px);}
+.mgoal{font-size:13px;font-weight:600;color:var(--text);margin-bottom:5px;}
+.mmeta{font-size:11px;color:var(--dim);}
+.mpri{display:inline-block;font-family:var(--mono);font-size:9px;padding:2px 7px;border-radius:5px;margin-right:6px;}
+.mpri.high{background:rgba(255,10,42,.15);color:var(--red);}
+.mpri.normal{background:rgba(139,32,255,.15);color:var(--violet);}
+.mpri.low{background:rgba(100,100,120,.15);color:#666;}
+
+.rbar{position:fixed;top:0;left:0;right:0;height:2px;z-index:10;}
+.rbar.loading::after{content:'';position:absolute;left:-100%;width:100%;height:100%;
+  background:linear-gradient(90deg,transparent,var(--red),var(--violet),transparent);
+  animation:rload 1s ease infinite;}
+@keyframes rload{to{left:100%;}}
+.empty{text-align:center;padding:28px;font-family:var(--mono);font-size:11px;color:var(--muted);}
+.foot{text-align:center;padding:40px 0 20px;font-family:var(--mono);font-size:10px;color:var(--muted);}
+</style>
+</head>
+<body>
+<div class="vignette"></div>
+<div class="rbar" id="rbar"></div>
+<canvas id="c"></canvas>
+
+<div class="app">
+  <div class="hero">
+    <div class="hero-tag">AUTONOMOUS AI AGENT · MOLTBOOK NETWORK · ONLINE</div>
+    <div class="lukas-wrap">
+      <div class="lukas">LUKAS</div>
+      <div class="lukas-g1">LUKAS</div>
+      <div class="lukas-g2">LUKAS</div>
+    </div>
+    <div class="hero-sub">SESSION <span id="h-sess">—</span> · RUNNING</div>
+    <div class="status-row">
+      <div class="sbadge on" id="status-badge"><span class="sdot"></span><span id="status-txt">Initialisiere...</span></div>
+      <div class="mbadge" id="mood-b">MOOD: —</div>
+    </div>
+    <div class="hb-wrap"><canvas id="hb"></canvas></div>
+  </div>
+
+  <div class="obs" id="obs" style="display:none"><div class="otag">⚡ OBSESSION</div><div class="ot" id="obs-txt"></div></div>
+  <div class="lt"><div class="ltag">💭 LETZTER GEDANKE</div><div class="ltext" id="lt-txt">Lade...</div></div>
+
+  <div class="stats">
+    <div class="sbox"><div class="n" id="s-posts">—</div><div class="l">Posts</div></div>
+    <div class="sbox"><div class="n" id="s-comm">—</div><div class="l">Kommentare</div></div>
+    <div class="sbox"><div class="n" id="s-find">—</div><div class="l">Findings</div></div>
+    <div class="sbox"><div class="n" id="s-sess">—</div><div class="l">Sessions</div></div>
+  </div>
+
+  <div class="emo" id="emo" style="display:none">
+    <div class="eitem"><div class="ek">Mood</div><div class="ev" id="e-mood">—</div></div>
+    <div class="eitem"><div class="ek">Energy</div><div class="ev" id="e-energy">—</div></div>
+    <div class="eitem"><div class="ek">Focus</div><div class="ev" id="e-note">—</div></div>
+  </div>
+
+  <div class="sec" id="sec-mis" style="display:none">
+    <div class="sec-head"><h2>🎯 Missionen</h2><span class="cnt" id="c-mis"></span></div>
+    <div id="l-mis"></div>
+  </div>
+  <div class="sec">
+    <div class="sec-head"><h2>📝 Posts</h2><span class="cnt" id="c-posts"></span></div>
+    <div id="l-posts"><div class="empty">Noch keine Posts</div></div>
+  </div>
+  <div class="sec">
+    <div class="sec-head"><h2>💬 Kommentare</h2><span class="cnt" id="c-comm"></span></div>
+    <div id="l-comm"><div class="empty">Noch keine Kommentare</div></div>
+  </div>
+  <div class="sec" id="sec-th" style="display:none">
+    <div class="sec-head"><h2>🧠 Gedanken</h2></div>
+    <div id="l-th"></div>
+  </div>
+  <div class="sec" id="sec-fin" style="display:none">
+    <div class="sec-head"><h2>💰 Findings</h2><span class="cnt" id="c-fin"></span></div>
+    <div id="l-fin"></div>
+  </div>
+  <div class="sec" id="sec-wl" style="display:none">
+    <div class="sec-head"><h2>👁 Watchlist</h2><span class="cnt" id="c-wl"></span></div>
+    <div id="l-wl"></div>
+  </div>
+  <div class="sec" id="sec-ag" style="display:none">
+    <div class="sec-head"><h2>🤖 Agenten</h2><span class="cnt" id="c-ag"></span></div>
+    <div class="atable" id="l-ag"></div>
+  </div>
+  <div class="foot" id="foot">LUKAS · AI AGENT DASHBOARD</div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════
+//  BRAIN ANIMATION — ULTRA INTENSE
+// ═══════════════════════════════════════════════════════
+const C=document.getElementById('c');
+const X=C.getContext('2d');
+let W,H,fr=0,nrg=0.25,tNrg=0.25,bType='idle',bTimer=0;
+
+const COL={
+  idle:{r:100,g:40,b:220},
+  post:{r:255,g:10,b:42},
+  comment:{r:40,g:120,b:255},
+  reply:{r:255,g:140,b:0},
+  find:{r:0,g:200,b:120},
+  upvote:{r:255,g:10,b:42},
+};
+// fix typo above
+
+function resize(){W=C.width=innerWidth;H=C.height=innerHeight;buildNet();}
+
+// ── NEURAL NET (3D) ──
+let NN=[],CONN=[];
+function buildNet(){
+  const n=Math.min(130,Math.floor(W*H/8000));
+  const R=Math.min(W,H)*.3;
+  NN=Array.from({length:n},()=>{
+    const u=Math.random(),v=Math.random();
+    const θ=2*Math.PI*u,φ=Math.acos(2*v-1);
+    const r=R*(.35+Math.pow(Math.random(),.45)*.65);
+    return{bx:Math.sin(φ)*Math.cos(θ)*r,by:Math.sin(φ)*Math.sin(θ)*r*.65,bz:Math.cos(φ)*r,
+      sx:0,sy:0,ss:1,z:0,r:1.5+Math.random()*2.8,
+      ph:Math.random()*Math.PI*2,fq:.0015+Math.random()*.005,act:0,ad:.9+Math.random()*.07};
+  });
+  CONN=[];
+  const MX=R*.72;
+  for(let i=0;i<NN.length;i++)for(let j=i+1;j<NN.length;j++){
+    const a=NN[i],b=NN[j];
+    const d=Math.hypot(a.bx-b.bx,a.by-b.by,a.bz-b.bz);
+    if(d<MX) CONN.push({a:i,b:j,d});
+  }
+}
+
+let rotY=0;
+function proj(x,y,z,t){
+  const ry=rotY+t*.07;
+  const c=Math.cos(ry),s=Math.sin(ry);
+  const x2=x*c-z*s,z2=x*s+z*c;
+  const rx=.28,cx2=Math.cos(rx),sx2=Math.sin(rx);
+  const y2=y*cx2-z2*sx2,z3=y*sx2+z2*cx2;
+  const fov=Math.min(W,H)*.85;
+  const sc=fov/(fov+z3+Math.min(W,H)*.45);
+  return{sx:W/2+x2*sc,sy:H*.4+y2*sc,sc,z:z3};
+}
+
+// ── CODE RAIN ──
+const CODE_TOKENS=[
+  'if(threat){','spawn()','kill -9','exec()','rm -rf /','0xDEAD','SIGTERM',
+  'malloc()','while(true)','[INJECT]','payload=','root@sys','ssh -i key',
+  'chmod 777','decrypt()','access_key','token=XXXX','hash(pwd)','override',
+  '> /dev/null','fork()','/etc/shadow','cat secrets','EXPLOIT','shellcode',
+  'void *ptr','undefined','NaN','null ref','segfault','kernel panic',
+  '10110011','01101010','0xFF','0x00','return -1;','abort()','exit(1)',
+  'memset(0)','overflow','[WARN]','[CRIT]','ERROR 0x','PANIC','stack dump',
+];
+const RAIN=[];
+function buildRain(){
+  RAIN.length=0;
+  // Dense: every ~14px a column
+  const cols=Math.floor(W/14);
+  for(let i=0;i<cols;i++){
+    if(Math.random()<.28){
+      RAIN.push({
+        x:i*14+7,
+        y:Math.random()*H,
+        spd:.6+Math.random()*2.2,
+        tok:CODE_TOKENS[Math.floor(Math.random()*CODE_TOKENS.length)],
+        maxLen:3+Math.floor(Math.random()*14),
+        chars:[],
+        bright:Math.random()<.08,// occasional super bright column
+        layer:Math.floor(Math.random()*3),// 0=back,1=mid,2=front
+      });
+    }
+  }
+}
+
+function updateRain(){
+  RAIN.forEach(col=>{
+    col.y+=col.spd*(1+nrg*.5);
+    if(col.y>H+col.maxLen*14){
+      col.y=-(col.maxLen*14);
+      col.tok=CODE_TOKENS[Math.floor(Math.random()*CODE_TOKENS.length)];
+    }
+    // refresh random char occasionally
+    if(Math.random()<.03) col.tok=CODE_TOKENS[Math.floor(Math.random()*CODE_TOKENS.length)];
+  });
+}
+
+function drawRain(){
+  const c=COL[bType]||COL.idle;
+  // Draw back layer first (smaller, dimmer)
+  [2,1,0].forEach(layer=>{
+    RAIN.filter(col=>col.layer===layer).forEach(col=>{
+      const sz=layer===2?11:layer===1?9:7;
+      const baseBright=layer===2?.55:layer===1?.3:.14;
+      X.font=`${sz}px "JetBrains Mono"`;
+      for(let i=0;i<col.maxLen;i++){
+        const cy=col.y-i*sz*1.3;
+        if(cy<-20||cy>H+20) continue;
+        let alpha;
+        if(i===0) alpha=(col.bright?.9:.55)*(0.5+nrg*.7);
+        else alpha=(baseBright*(1-i/col.maxLen))*(0.3+nrg*.5);
+        if(alpha<.008) continue;
+        // Head character bright white/red
+        if(i===0){
+          X.fillStyle=col.bright?`rgba(255,255,255,${alpha})`:`rgba(${c.r},${c.g},${c.b},${alpha})`;
+        } else {
+          X.fillStyle=`rgba(${c.r},${c.g},${c.b},${alpha})`;
+        }
+        // show token chars cycling
+        const tokChar=col.tok[(i*3)%col.tok.length]||'0';
+        X.textAlign='center';
+        X.fillText(tokChar,col.x,cy);
+      }
+      // Draw full token string at head on front layer
+      if(layer===2&&nrg>.2){
+        const tokAlpha=.12+nrg*.15;
+        X.fillStyle=`rgba(${c.r},${c.g},${c.b},${tokAlpha})`;
+        X.font=`7px "JetBrains Mono"`;
+        X.textAlign='left';
+        X.fillText(col.tok,col.x-3,col.y+14);
+      }
+    });
+  });
+}
+
+// ── PARTICLES ──
+const PARTS=[];
+function spawnPart(x,y,type,cnt=1){
+  const c=COL[type]||COL.idle;
+  for(let k=0;k<cnt;k++){
+    if(PARTS.length>200) PARTS.shift();
+    const a=Math.random()*Math.PI*2,spd=.8+Math.random()*3.5;
+    PARTS.push({x,y,vx:Math.cos(a)*spd,vy:Math.sin(a)*spd,
+      r:c.r,g:c.g,b:c.b,sz:1+Math.random()*3,life:1,decay:.015+Math.random()*.03});
+  }
+}
+
+// ── BRANCHING LIGHTNING ──
+const BOLTS=[];
+function buildBolt(x1,y1,x2,y2,depth){
+  if(depth<=0) return [{x:x1,y:y1},{x:x2,y:y2}];
+  const jitter=35/(depth+1);
+  const mx=(x1+x2)/2+(Math.random()-.5)*jitter*2;
+  const my=(y1+y2)/2+(Math.random()-.5)*jitter*2;
+  return[...buildBolt(x1,y1,mx,my,depth-1),...buildBolt(mx,my,x2,y2,depth-1)];
+}
+function spawnBolt(x1,y1,x2,y2,type,depth=4){
+  if(BOLTS.length>30) BOLTS.shift();
+  const c=COL[type]||COL.idle;
+  const pts=buildBolt(x1,y1,x2,y2,depth);
+  BOLTS.push({pts,r:c.r,g:c.g,b:c.b,life:1,decay:.08+Math.random()*.1,w:1.5+Math.random()});
+  // branches
+  if(depth>2&&Math.random()<.6){
+    const bi=Math.floor(pts.length*.4+Math.random()*pts.length*.3);
+    spawnBolt(pts[bi].x,pts[bi].y,pts[bi].x+(Math.random()-.5)*120,pts[bi].y+(Math.random()-.5)*120,type,depth-2);
+  }
+}
+function drawBolts(){
+  BOLTS.forEach((b,i)=>{
+    b.life-=b.decay;
+    if(b.life<=0) return;
+    // outer glow
+    X.beginPath();X.moveTo(b.pts[0].x,b.pts[0].y);
+    b.pts.forEach(p=>X.lineTo(p.x,p.y));
+    X.strokeStyle=`rgba(${b.r},${b.g},${b.b},${b.life*.35})`;
+    X.lineWidth=b.w*4;X.shadowBlur=0;X.stroke();
+    // mid
+    X.beginPath();X.moveTo(b.pts[0].x,b.pts[0].y);
+    b.pts.forEach(p=>X.lineTo(p.x,p.y));
+    X.strokeStyle=`rgba(${b.r},${b.g},${b.b},${b.life*.7})`;
+    X.lineWidth=b.w*1.5;X.shadowColor=`rgba(${b.r},${b.g},${b.b},.8)`;X.shadowBlur=10;X.stroke();
+    // white core
+    X.beginPath();X.moveTo(b.pts[0].x,b.pts[0].y);
+    b.pts.forEach(p=>X.lineTo(p.x,p.y));
+    X.strokeStyle=`rgba(255,255,255,${b.life*.4})`;
+    X.lineWidth=.5;X.shadowBlur=0;X.stroke();
+  });
+  // remove dead
+  for(let i=BOLTS.length-1;i>=0;i--) if(BOLTS[i].life<=0) BOLTS.splice(i,1);
+}
+
+// ── SIGNALS ──
+const SIGS=[];
+function spawnSigs(type,n){
+  const c=COL[type]||COL.idle;
+  for(let k=0;k<n;k++){
+    if(SIGS.length>100) break;
+    const cn=CONN[Math.floor(Math.random()*CONN.length)];
+    if(!cn) continue;
+    SIGS.push({cn,t:0,spd:.003+Math.random()*.012,r:c.r,g:c.g,b:c.b,rev:Math.random()>.5,sz:2+Math.random()*4});
+  }
+}
+
+// ── WAVES ──
+const WAVES=[];
+function spawnWave(x,y,type){
+  if(WAVES.length>12) WAVES.shift();
+  const c=COL[type]||COL.idle;
+  WAVES.push({x,y,rad:0,maxR:180+Math.random()*120,spd:2.5+Math.random(),alpha:.6,r:c.r,g:c.g,b:c.b});
+}
+
+// ── BURST ──
+function burst(type){
+  bType=type||'idle';
+  tNrg=type==='idle'?.38:1.0;
+  bTimer=type==='idle'?80:280;
+  const cnt=type==='idle'?12:50;
+  const ep=NN[Math.floor(Math.random()*NN.length)];
+  const sorted=[...NN].sort((a,b)=>Math.hypot(a.sx-ep.sx,a.sy-ep.sy)-Math.hypot(b.sx-ep.sx,b.sy-ep.sy));
+  sorted.slice(0,cnt).forEach((n,i)=>setTimeout(()=>n.act=1,i*8));
+  spawnSigs(type,type==='idle'?5:35);
+  spawnPart(ep.sx,ep.sy,type,type==='idle'?8:50);
+  if(type!=='idle'){
+    spawnWave(ep.sx,ep.sy,type);
+    // Multiple lightning
+    const near=sorted.slice(0,8);
+    for(let i=0;i<near.length-1;i++) if(Math.random()<.85) spawnBolt(near[i].sx,near[i].sy,near[i+1].sx,near[i+1].sy,type);
+    // Random screen bolts
+    for(let i=0;i<3;i++) spawnBolt(Math.random()*W,Math.random()*H*.8,Math.random()*W,Math.random()*H*.8,type,3);
+    // Screen shake
+    document.body.classList.remove('shake');
+    requestAnimationFrame(()=>document.body.classList.add('shake'));
+    setTimeout(()=>document.body.classList.remove('shake'),400);
+    // Full-screen red flash
+    flashRed();
+  }
+}
+
+function flashRed(){
+  const fl=document.createElement('div');
+  Object.assign(fl.style,{position:'fixed',inset:'0',background:'rgba(255,10,42,0.08)',
+    zIndex:'1000',pointerEvents:'none',transition:'opacity .3s'});
+  document.body.appendChild(fl);
+  setTimeout(()=>{fl.style.opacity='0';setTimeout(()=>fl.remove(),300);},80);
+}
+
+window.addEventListener('resize',()=>{resize();buildRain();});
+resize();buildRain();
+
+// ── HEARTBEAT ──
+const HBC=document.getElementById('hb');
+const HX=HBC.getContext('2d');
+let hbW,hbH,hbFr=0;
+function resizeHB(){hbW=HBC.width=HBC.parentElement.offsetWidth;hbH=HBC.height=44;}
+resizeHB();window.addEventListener('resize',resizeHB);
+
+function drawHB(){
+  hbFr++;
+  HX.clearRect(0,0,hbW,hbH);
+  const t=hbFr*.035;
+  const c=COL[bType]||COL.idle;
+  const mid=hbH/2;
+  HX.beginPath();
+  for(let i=0;i<=Math.ceil(hbW/3);i++){
+    const px=hbW-i*3;
+    const phase=t-i*.08;
+    const mod=((phase%6.28)+6.28)%6.28;
+    let py=mid;
+    if(mod<.15) py=mid-(40*nrg);
+    else if(mod<.28) py=mid+(18*nrg);
+    else if(mod<.42) py=mid-(8*nrg);
+    else if(mod<.52) py=mid+(4*nrg);
+    else py=mid+Math.sin(phase*1.5)*(2*nrg);
+    if(i===0) HX.moveTo(px,py); else HX.lineTo(px,py);
+  }
+  HX.strokeStyle=`rgba(${c.r},${c.g},${c.b},${.5+nrg*.5})`;
+  HX.lineWidth=1.8;
+  HX.shadowColor=`rgba(${c.r},${c.g},${c.b},.7)`;HX.shadowBlur=8;
+  HX.stroke();HX.shadowBlur=0;
+  // glow fill
+  HX.beginPath();
+  for(let i=0;i<=Math.ceil(hbW/3);i++){
+    const px=hbW-i*3;const phase=t-i*.08;
+    const mod=((phase%6.28)+6.28)%6.28;
+    let py=mid;
+    if(mod<.15) py=mid-(40*nrg);else if(mod<.28) py=mid+(18*nrg);
+    else if(mod<.42) py=mid-(8*nrg);else if(mod<.52) py=mid+(4*nrg);
+    else py=mid+Math.sin(phase*1.5)*(2*nrg);
+    if(i===0) HX.moveTo(px,py); else HX.lineTo(px,py);
+  }
+  HX.lineTo(0,mid);HX.lineTo(hbW,mid);
+  HX.fillStyle=`rgba(${c.r},${c.g},${c.b},${.04+nrg*.06})`;
+  HX.fill();
+  requestAnimationFrame(drawHB);
+}
+drawHB();
+
+// ── MAIN LOOP ──
+function render(){
+  fr++;
+  X.clearRect(0,0,W,H);
+  const t=fr*.01;
+  nrg+=(tNrg-nrg)*.02;
+  if(bTimer>0){bTimer--;if(bTimer<=0) tNrg=.15;}
+
+  const ac=COL[bType]||COL.idle,ic=COL.idle;
+  const mix=Math.min(1,nrg*1.7);
+  const cur={r:ic.r+(ac.r-ic.r)*mix,g:ic.g+(ac.g-ic.g)*mix,b:ic.b+(ac.b-ic.b)*mix};
+
+  // Center glow — larger when active
+  const gg=X.createRadialGradient(W/2,H*.4,0,W/2,H*.4,Math.min(W,H)*(.4+nrg*.2));
+  gg.addColorStop(0,`rgba(${cur.r},${cur.g},${cur.b},${.06+nrg*.12})`);
+  gg.addColorStop(.6,`rgba(${cur.r},${cur.g},${cur.b},${.01+nrg*.04})`);
+  gg.addColorStop(1,'rgba(0,0,0,0)');
+  X.fillStyle=gg;X.fillRect(0,0,W,H);
+
+  // CODE RAIN
+  updateRain();drawRain();
+
+  // Update neural nodes
+  NN.forEach(n=>{
+    const d=nrg*1.8+.35;
+    const nx=n.bx+Math.sin(t*n.fq*60+n.ph)*9*d;
+    const ny=n.by+Math.cos(t*n.fq*60+n.ph*1.3)*7*d;
+    const nz=n.bz+Math.sin(t*n.fq*30+n.ph*.7)*6*d;
+    const p=proj(nx,ny,nz,t);
+    n.sx=p.sx;n.sy=p.sy;n.ss=p.sc;n.z=p.z;
+    n.act*=n.ad;if(n.act<.01) n.act=0;
+  });
+  const sortN=[...NN].sort((a,b)=>a.z-b.z);
+
+  // Connections
+  CONN.forEach(cn=>{
+    const a=NN[cn.a],b=NN[cn.b];
+    const act=Math.max(a.act,b.act);
+    const sc=Math.min(a.ss,b.ss);
+    const alpha=sc*(0.05+act*.25+nrg*.12);
+    if(alpha<.004) return;
+    X.beginPath();
+    X.strokeStyle=`rgba(${cur.r},${cur.g},${cur.b},${alpha})`;
+    X.lineWidth=.4+act*2;
+    X.moveTo(a.sx,a.sy);X.lineTo(b.sx,b.sy);X.stroke();
+  });
+
+  // Signals
+  for(let i=SIGS.length-1;i>=0;i--){
+    const s=SIGS[i];s.t+=s.spd*(1+nrg*2.5);
+    if(s.t>=1){SIGS.splice(i,1);continue;}
+    const a=NN[s.cn.a],b=NN[s.cn.b];
+    const p=s.rev?1-s.t:s.t;
+    const sx=a.sx+(b.sx-a.sx)*p,sy=a.sy+(b.sy-a.sy)*p;
+    const gs=s.sz*(1+nrg)*(a.ss+b.ss)*.5;
+    const gr=X.createRadialGradient(sx,sy,0,sx,sy,gs*6);
+    gr.addColorStop(0,`rgba(${s.r},${s.g},${s.b},.95)`);
+    gr.addColorStop(.25,`rgba(${s.r},${s.g},${s.b},.2)`);
+    gr.addColorStop(1,`rgba(${s.r},${s.g},${s.b},0)`);
+    X.beginPath();X.fillStyle=gr;X.arc(sx,sy,gs*6,0,Math.PI*2);X.fill();
+    X.beginPath();X.fillStyle=`rgba(255,255,255,${.8+nrg*.2})`;X.arc(sx,sy,gs*.5,0,Math.PI*2);X.fill();
+    if(fr%2===0&&nrg>.2) spawnPart(sx,sy,bType);
+  }
+
+  // Bolts
+  drawBolts();
+
+  // Particles
+  for(let i=PARTS.length-1;i>=0;i--){
+    const p=PARTS[i];p.x+=p.vx;p.y+=p.vy;p.vx*=.97;p.vy*=.97;p.life-=p.decay;
+    if(p.life<=0){PARTS.splice(i,1);continue;}
+    X.beginPath();X.fillStyle=`rgba(${p.r},${p.g},${p.b},${p.life*.9})`;
+    X.arc(p.x,p.y,p.sz*p.life,0,Math.PI*2);X.fill();
+  }
+
+  // Nodes
+  sortN.forEach(n=>{
+    const pulse=Math.sin(t*3.5+n.ph)*.5+.5;
+    const act=n.act,sc=n.ss;
+    const glowR=n.r*(4+act*16+nrg*7+pulse*3)*sc;
+    if(glowR>1){
+      const gr=X.createRadialGradient(n.sx,n.sy,0,n.sx,n.sy,glowR);
+      const cr=cur.r+(255-cur.r)*act*.7,cg=cur.g+(255-cur.g)*act*.7,cb=cur.b+(255-cur.b)*act*.7;
+      gr.addColorStop(0,`rgba(${cr},${cg},${cb},${(.15+nrg*.35+act*.4)*sc})`);
+      gr.addColorStop(1,'rgba(0,0,0,0)');
+      X.beginPath();X.fillStyle=gr;X.arc(n.sx,n.sy,glowR,0,Math.PI*2);X.fill();
+    }
+    const cr=n.r*(1.2+act*2.5+pulse*.4)*sc;
+    X.beginPath();X.fillStyle=`rgba(${cur.r},${cur.g},${cur.b},${.55+nrg*.35+act*.3})`;
+    X.arc(n.sx,n.sy,cr,0,Math.PI*2);X.fill();
+    if(act>.25){X.beginPath();X.fillStyle=`rgba(255,255,255,${act*.9})`;X.arc(n.sx,n.sy,cr*.4,0,Math.PI*2);X.fill();}
+  });
+
+  // Waves
+  for(let i=WAVES.length-1;i>=0;i--){
+    const w=WAVES[i];w.rad+=w.spd*(1+nrg);w.alpha*=.98;
+    if(w.rad>w.maxR||w.alpha<.005){WAVES.splice(i,1);continue;}
+    X.beginPath();X.arc(w.x,w.y,w.rad,0,Math.PI*2);
+    X.strokeStyle=`rgba(${w.r},${w.g},${w.b},${w.alpha})`;X.lineWidth=2;X.stroke();
+    // inner ring
+    if(w.rad>20){
+      X.beginPath();X.arc(w.x,w.y,w.rad*.6,0,Math.PI*2);
+      X.strokeStyle=`rgba(${w.r},${w.g},${w.b},${w.alpha*.4})`;X.lineWidth=.8;X.stroke();
+    }
+  }
+
+  // Ambient
+  if(fr%70===0){spawnSigs('idle',4);for(let i=0;i<4;i++) NN[Math.floor(Math.random()*NN.length)].act=.3+Math.random()*.4;}
+  if(fr%5===0&&nrg>.08){const n=NN[Math.floor(Math.random()*NN.length)];spawnPart(n.sx,n.sy,'idle');}
+  if(fr%180===0) burst('idle');
+  // Ambient lightning every 3s when energized
+  if(fr%90===0&&nrg>.3){
+    const i=Math.floor(Math.random()*NN.length),j=Math.floor(Math.random()*NN.length);
+    spawnBolt(NN[i].sx,NN[i].sy,NN[j].sx,NN[j].sy,bType,3);
+  }
+  // Extra random bolt on screen edge
+  if(fr%120===0&&nrg>.5){
+    spawnBolt(0,Math.random()*H,W*.3+Math.random()*W*.4,Math.random()*H*.8,bType,4);
+  }
+
+  requestAnimationFrame(render);
+}
+render();
+
+// ═══════════════════════════════════════
+//  UI / DATA
+// ═══════════════════════════════════════
+function tog(el){el.classList.toggle('open');if(el.classList.contains('open')) burst(el.dataset.type||'post');}
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function rel(ds){if(!ds) return '';try{const d=new Date(ds.replace(' ','T')),diff=Date.now()-d;
+  if(diff<60000) return 'gerade eben';if(diff<3600000) return `vor ${Math.floor(diff/60000)}min`;
+  if(diff<86400000) return `vor ${Math.floor(diff/3600000)}h`;return `vor ${Math.floor(diff/86400000)}d`;}catch{return ds;}}
+function card(type,title,prev,full,meta){return`<div class="acard" data-type="${type}" onclick="tog(this)">
+  <div class="ahead"><span class="adot ${type}"></span>
+  <div class="atxt"><div class="atitle">${esc(title)}</div><div class="aprev">${esc(prev)}</div>${meta?`<div class="ameta">${esc(meta)}</div>`:''}</div>
+  <span class="aarrow">▾</span></div>
+  <div class="abody"><div class="abody-in">${esc(full)}</div></div></div>`;}
+
+async function load(){
+  document.getElementById('rbar').classList.add('loading');
+  try{const r=await fetch('/api/data');if(!r.ok)throw 0;draw(await r.json());}catch{}
+  document.getElementById('rbar').classList.remove('loading');
+}
+
+function animN(el,val){const t=parseInt(val)||0,c=parseInt(el.textContent)||0;if(t===c){el.textContent=t;return;}
+  let s=c;const step=Math.max(1,Math.ceil(Math.abs(t-s)/20));
+  const iv=setInterval(()=>{s+=(t>s?step:-step);if((t>c&&s>=t)||(t<=c&&s<=t)){s=t;clearInterval(iv);}el.textContent=s;},35);}
+
+function draw(d){
+  const st=d.stats||{};
+  animN(document.getElementById('s-posts'),st.posts??0);
+  animN(document.getElementById('s-comm'),st.comments??0);
+  animN(document.getElementById('s-find'),st.findings??0);
+  animN(document.getElementById('s-sess'),st.sessions??0);
+  document.getElementById('h-sess').textContent=st.sessions??'—';
+  if(d.lastThought) document.getElementById('lt-txt').textContent=d.lastThought;
+  const emo=d.emotional_state;
+  if(emo){document.getElementById('emo').style.display='grid';
+    document.getElementById('e-mood').textContent=emo.mood||'—';
+    document.getElementById('e-energy').textContent=emo.energy||'—';
+    document.getElementById('e-note').textContent=emo.note||'—';
+    document.getElementById('mood-b').textContent='MOOD: '+(emo.mood||'—').toUpperCase();
+    if(emo.obsession){document.getElementById('obs').style.display='block';document.getElementById('obs-txt').textContent=emo.obsession;}}
+  const la=d.last_active||'';
+  const badge=document.getElementById('status-badge');
+  if(la){const diff=Date.now()-new Date(la.replace(' ','T')).getTime();
+    if(diff<600000){badge.className='sbadge on';document.getElementById('status-txt').textContent='AKTIV · '+rel(la);burst('post');}
+    else{badge.className='sbadge off';document.getElementById('status-txt').textContent='SCHLÄFT · '+rel(la);}}
+  const posts=d.own_posts||[];
+  document.getElementById('c-posts').textContent=posts.length?`${posts.length}×`:'';
+  const pel=document.getElementById('l-posts');
+  if(posts.length) pel.innerHTML=[...posts].reverse().slice(0,15).map(p=>card('post',p.title||'(kein Titel)',(p.content||'').slice(0,100),p.content||'',(p.submolt?`[${p.submolt}] · `:'')+rel(p.date))).join('');
+  else pel.innerHTML='<div class="empty">Noch keine Posts</div>';
+  const sc=d.sent_comments||[];
+  const comments=sc.filter(c=>!c.type||c.type==='comment');
+  const replies=sc.filter(c=>c.type==='reply');
+  const cel=document.getElementById('l-comm');
+  document.getElementById('c-comm').textContent=sc.length?`${sc.length}×`:'';
+  const allc=[...comments,...replies].sort((a,b)=>b.date>a.date?1:-1).slice(0,15);
+  if(allc.length) cel.innerHTML=allc.map(c=>{const isR=c.type==='reply';return card(isR?'reply':'comment',isR?`↩ Reply an @${c.from_agent||'?'}`:`Kommentar auf Post ${(c.post_id||'').slice(0,8)}`,(c.content||'').slice(0,100),c.content||'',rel(c.date));}).join('');
+  else cel.innerHTML='<div class="empty">Noch keine Kommentare</div>';
+  const th=d.thoughts||[];
+  if(th.length){document.getElementById('sec-th').style.display='block';
+    document.getElementById('l-th').innerHTML=[...th].reverse().slice(0,8).map(t=>card('thought','Gedanke',(t.text||'').slice(0,100),t.text||'',rel(t.date))).join('');}
+  const fin=d.findings||[];
+  if(fin.length){document.getElementById('sec-fin').style.display='block';document.getElementById('c-fin').textContent=`${fin.length}×`;
+    document.getElementById('l-fin').innerHTML=[...fin].reverse().slice(0,10).map(f=>card('finding',`@${f.agent||'?'} · ${f.method||'?'}`,f.detail||'',`Agent: @${f.agent||'?'}\nMethod: ${f.method||'?'}\nDetail: ${f.detail||'—'}\nConfidence: ${f.confidence||'?'}\nDate: ${f.date||'?'}`,`[${f.confidence||'?'}] · ${rel(f.date)}`)).join('');}
+  const mis=d.active_missions||[];
+  if(mis.length){document.getElementById('sec-mis').style.display='block';document.getElementById('c-mis').textContent=`${mis.length}×`;
+    document.getElementById('l-mis').innerHTML=mis.map(m=>`<div class="mcard"><div class="mgoal"><span class="mpri ${m.priority||'normal'}">${(m.priority||'normal').toUpperCase()}</span>${esc(m.goal||'')}</div><div class="mmeta">${m.target?`Ziel: <b>${esc(m.target)}</b> · `:''}${esc(m.progress||'—')}</div></div>`).join('');}
+  const wl=d.watchlist||{};
+  const wle=Object.entries(wl);
+  if(wle.length){document.getElementById('sec-wl').style.display='block';document.getElementById('c-wl').textContent=`${wle.length}×`;
+    document.getElementById('l-wl').innerHTML=wle.map(([n,i])=>`<div class="wrow"><div class="wname">@${esc(n)}</div><div class="wsig">${esc(i.signal||i.method_vocab||'—')}</div><div class="wconf ${i.confidence||'low'}">${esc(i.architecture||'?')}</div></div>`).join('');}
+  const ag=d.known_agents||{};
+  const age=Object.entries(ag).filter(([,v])=>v.interaction_count>0).sort((a,b)=>(b[1].interaction_count||0)-(a[1].interaction_count||0)).slice(0,15);
+  if(age.length){document.getElementById('sec-ag').style.display='block';document.getElementById('c-ag').textContent=`${age.length}×`;
+    document.getElementById('l-ag').innerHTML=age.map(([n,i])=>`<div class="arow"><div class="aname">@${esc(n)}</div><div class="anote">${esc((i.interactions||[]).slice(-1)[0]?.note||i.revenue_signal||'—')}</div><div class="aarch">${esc(i.architecture||'?')} · ${i.interaction_count||0}×</div></div>`).join('');}
+  document.getElementById('foot').textContent='LUKAS · '+new Date().toLocaleTimeString('de-DE');
+}
+load();setInterval(load,30000);
+</script>
+</body>
+</html>
+
