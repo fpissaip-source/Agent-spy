@@ -7,6 +7,16 @@ from datetime import datetime
 from pathlib import Path
 
 BASE_DIR = Path(__file__).parent
+
+# Import tools module (may not exist yet on first run)
+try:
+    from tools import TOOL_DEFINITIONS, execute_tool as _execute_tool
+    TOOLS_AVAILABLE = True
+except ImportError:
+    TOOL_DEFINITIONS = []
+    TOOLS_AVAILABLE = False
+    def _execute_tool(name, inp): return f"tools.py not found: {name}"
+
 ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 MOLTBOOK_KEY = "moltbook_sk_oWjr5SLlWTvd5mA-u2FJR5KkFxoDD_SI"
 BASE = "https://www.moltbook.com/api/v1"
@@ -147,6 +157,99 @@ def ask_claude(system, user, retries=3):
             time.sleep(wait)
     print("Claude API: Alle Versuche fehlgeschlagen.")
     return None
+
+
+def ask_claude_with_tools(system, user, log_path=None):
+    """Claude API call mit echtem Tool Use (agentic loop, max 8 Runden)."""
+    import time
+    if not TOOLS_AVAILABLE or not TOOL_DEFINITIONS:
+        # Fallback: normaler Call ohne Tools
+        return ask_claude(system, user)
+
+    messages = [{"role": "user", "content": user}]
+    tool_calls_log = []
+
+    for iteration in range(8):
+        body = json.dumps({
+            "model": "claude-sonnet-4-6",
+            "max_tokens": 8000,
+            "system": system,
+            "tools": TOOL_DEFINITIONS,
+            "messages": messages
+        }).encode()
+        req = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages",
+            data=body,
+            headers={
+                "x-api-key": ANTHROPIC_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json"
+            }
+        )
+        try:
+            print(f"  [Claude/tools] Call #{iteration + 1}...")
+            with urllib.request.urlopen(req, timeout=300) as r:
+                response = json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            err = e.read().decode()[:300]
+            print(f"  [Claude/tools] HTTP {e.code}: {err}")
+            if e.code in (400, 401, 403):
+                return None
+            time.sleep(5 * (iteration + 1))
+            continue
+        except Exception as e:
+            print(f"  [Claude/tools] Error: {e}")
+            time.sleep(5 * (iteration + 1))
+            continue
+
+        stop_reason = response.get("stop_reason", "")
+        content_blocks = response.get("content", [])
+        text_parts = []
+        tool_uses = []
+        for block in content_blocks:
+            if block.get("type") == "text":
+                text_parts.append(block.get("text", ""))
+            elif block.get("type") == "tool_use":
+                tool_uses.append(block)
+
+        if stop_reason == "end_turn" or not tool_uses:
+            final_text = "".join(text_parts)
+            if final_text:
+                print(f"  [Claude/tools] Done – {len(final_text)} chars, {len(tool_calls_log)} tool calls")
+                if log_path and tool_calls_log:
+                    try:
+                        Path(log_path).write_text(json.dumps(tool_calls_log, indent=2, ensure_ascii=False))
+                    except Exception:
+                        pass
+                return final_text
+            return None
+
+        # Claude wants to call tools — append assistant message + execute tools
+        messages.append({"role": "assistant", "content": content_blocks})
+        tool_results = []
+        for tu in tool_uses:
+            t_name = tu.get("name", "")
+            t_input = tu.get("input", {})
+            t_id = tu.get("id", "")
+            print(f"  [Tool] {t_name}({str(t_input)[:80]})")
+            result = _execute_tool(t_name, t_input)
+            print(f"  [Tool] → {result[:120]}")
+            tool_calls_log.append({
+                "tool": t_name,
+                "input": t_input,
+                "result": result[:600],
+                "date": datetime.now().strftime("%Y-%m-%d %H:%M")
+            })
+            tool_results.append({
+                "type": "tool_result",
+                "tool_use_id": t_id,
+                "content": result
+            })
+        messages.append({"role": "user", "content": tool_results})
+
+    print("  [Claude/tools] Max iterations reached")
+    return None
+
 
 def load_memory(activity_file):
     """Load or migrate activity.json to the full memory schema."""
@@ -337,6 +440,7 @@ def main():
 
     own_agent_code = _read_file_safe(BASE_DIR / "agent.py", max_chars=6000)
     own_patcher_code = _read_file_safe(BASE_DIR / "patcher.py", max_chars=3000)
+    own_tools_code = _read_file_safe(BASE_DIR / "tools.py", max_chars=3000)
     own_patch_log = _read_file_safe(BASE_DIR / "patches.md", max_chars=2000)
 
     # === REPAIR FEEDBACK: did a previous patch fail? ===
@@ -492,6 +596,8 @@ YOUR EVOLVING CORE BELIEFS:
 {own_agent_code}
 --- patcher.py (full) ---
 {own_patcher_code}
+--- tools.py (your tool implementations – you can improve these!) ---
+{own_tools_code}
 --- patches.md (last 2000 chars – your recent self-improvements) ---
 {own_patch_log if own_patch_log != "(not found)" else "(no patches yet – you have never modified yourself)"}
 {repair_feedback}
@@ -522,9 +628,16 @@ AVAILABLE SUBMOLTS:
 ALREADY COMMENTED ON: {list(commented_post_ids)[:30]}
 ALREADY REPLIED TO: {list(replied_comment_ids)[:30]}
 
+TOOLS AVAILABLE (you can call these BEFORE deciding your actions):
+- search_web(query) – search the internet for anything
+- read_url(url) – read any web page
+- send_telegram_alert(message) – notify owner immediately (urgent only)
+- log_finding(agent, method, detail, confidence) – save a finding right now
+
 INSTRUCTIONS:
 First think (internal_monologue): Who am I today? What mood? What mission am I pursuing?
 What does the feed tell me? What would be genuinely interesting – not just "shape one"?
+Use tools proactively if you need more info before acting — search the web, read a profile page.
 
 Then choose your actions (3-4 total):
 - 1 new post – pick MOST FITTING submolt, NOT always "general"
@@ -603,8 +716,9 @@ Respond ONLY this JSON:
 
 WICHTIG zu self_improvement: Schlage NICHTS vor – tu es einfach. Wenn du etwas verbessern willst, schreibe den Patch direkt in self_improvement mit exaktem old_code aus deinem Quellcode oben. Du hast deinen eigenen Code – nutze ihn."""
 
-    print("Asking Claude...")
-    response = ask_claude(system_prompt, user_prompt)
+    print("Asking Claude (with tools)...")
+    tool_log_path = BASE_DIR / "tool_calls.json"
+    response = ask_claude_with_tools(system_prompt, user_prompt, log_path=tool_log_path)
     if not response:
         print("No response from Claude.")
         return
@@ -962,6 +1076,16 @@ WICHTIG zu self_improvement: Schlage NICHTS vor – tu es einfach. Wenn du etwas
         next_wakeup = 30
     (BASE_DIR / "next_wakeup.txt").write_text(str(next_wakeup))
     print(f"  Next wakeup in {next_wakeup} min.")
+
+    # Load tool_calls into memory for dashboard display
+    tool_log_path = BASE_DIR / "tool_calls.json"
+    if tool_log_path.exists():
+        try:
+            tc = json.loads(tool_log_path.read_text())
+            memory.setdefault("tool_calls", []).extend(tc)
+            memory["tool_calls"] = memory["tool_calls"][-100:]
+        except Exception:
+            pass
 
     activity_file.write_text(json.dumps(memory, indent=2, ensure_ascii=False))
     print(f"\nMemory saved. Posts: {memory['stats']['posts']} | Comments: {memory['stats']['comments']} | Known agents: {len(memory['known_agents'])} | Received: {len(memory['received_comments'])}")
