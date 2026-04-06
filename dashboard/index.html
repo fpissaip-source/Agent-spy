@@ -3,1223 +3,1268 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Lukas – Agent Intelligence</title>
+<title>LUKAS — AI Agent</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+*{margin:0;padding:0;box-sizing:border-box;}
 
-  :root {
-    --bg: #06060b;
-    --surface: rgba(15, 15, 25, 0.6);
-    --surface-solid: #0f0f19;
-    --card: rgba(20, 20, 35, 0.5);
-    --accent: #7c6aff;
-    --accent-bright: #9d8cff;
-    --pink: #ff5c8a;
-    --green: #00e87b;
-    --yellow: #ffbe0b;
-    --cyan: #00d4ff;
-    --text: #eeeeff;
-    --text-secondary: #8888aa;
-    --text-muted: #555570;
-    --border: rgba(124, 106, 255, 0.08);
-    --border-hover: rgba(124, 106, 255, 0.2);
-    --glow-accent: rgba(124, 106, 255, 0.3);
-    --glow-pink: rgba(255, 92, 138, 0.3);
-    --glow-green: rgba(0, 232, 123, 0.3);
-  }
+:root{
+  --bg:#03030a;
+  --red:#ff1a3a;
+  --red-dim:rgba(255,26,58,0.15);
+  --red-glow:rgba(255,26,58,0.4);
+  --violet:#9333ea;
+  --violet-dim:rgba(147,51,234,0.12);
+  --cyan:#00fff7;
+  --surface:rgba(10,8,20,0.75);
+  --card:rgba(12,10,24,0.8);
+  --border:rgba(255,26,58,0.12);
+  --border-active:rgba(255,26,58,0.35);
+  --text:#f0eeff;
+  --text-dim:#8880aa;
+  --text-muted:#44405a;
+  --mono:'JetBrains Mono',monospace;
+  --sans:'Space Grotesk',sans-serif;
+}
 
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
-    min-height: 100vh;
-    overflow-x: hidden;
-  }
+html{scroll-behavior:smooth;}
+body{
+  background:var(--bg);
+  color:var(--text);
+  font-family:var(--sans);
+  min-height:100vh;
+  overflow-x:hidden;
+}
 
-  /* ── FULLPAGE BRAIN CANVAS ── */
-  canvas#brain {
-    position: fixed;
-    top: 0; left: 0;
-    width: 100vw;
-    height: 100vh;
-    z-index: 0;
-    pointer-events: none;
-  }
+/* ── BRAIN CANVAS ── */
+#brain{
+  position:fixed;top:0;left:0;
+  width:100vw;height:100vh;
+  z-index:0;pointer-events:none;
+  opacity:0.9;
+}
 
-  /* ── HERO ── */
-  .hero {
-    position: relative;
-    width: 100%;
-    height: 620px;
-    z-index: 1;
-  }
+/* ── SCANLINE OVERLAY ── */
+body::after{
+  content:'';
+  position:fixed;inset:0;
+  background:repeating-linear-gradient(
+    0deg,
+    transparent,transparent 2px,
+    rgba(0,0,0,0.03) 2px,rgba(0,0,0,0.03) 4px
+  );
+  pointer-events:none;z-index:1;
+}
 
-  .hero-overlay {
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(180deg,
-      transparent 0%,
-      transparent 40%,
-      rgba(6,6,11,0.2) 70%,
-      rgba(6,6,11,0.5) 100%
-    );
-    pointer-events: none;
-  }
+/* ── LAYOUT ── */
+.wrap{
+  position:relative;z-index:2;
+  max-width:720px;
+  margin:0 auto;
+  padding:0 16px 80px;
+}
 
-  .hero-content {
-    position: absolute;
-    bottom: 48px;
-    left: 0; right: 0;
-    padding: 0 48px;
-    display: flex;
-    align-items: flex-end;
-    justify-content: space-between;
-    z-index: 2;
-  }
+/* ── HERO ── */
+.hero{
+  position:relative;
+  text-align:center;
+  padding:80px 24px 48px;
+  z-index:2;
+}
 
-  .hero-left h1 {
-    font-size: 48px;
-    font-weight: 800;
-    letter-spacing: -1.5px;
-    line-height: 1.1;
-    background: linear-gradient(135deg, #fff 0%, var(--accent-bright) 50%, var(--pink) 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    margin-bottom: 8px;
-  }
+.hero-eyebrow{
+  font-family:var(--mono);
+  font-size:11px;
+  letter-spacing:4px;
+  color:var(--red);
+  text-transform:uppercase;
+  margin-bottom:16px;
+  opacity:0.8;
+}
 
-  .hero-left .subtitle {
-    font-size: 16px;
-    color: var(--text-secondary);
-    font-weight: 400;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
+.hero-title{
+  font-size:clamp(64px,15vw,120px);
+  font-weight:700;
+  letter-spacing:-4px;
+  line-height:0.9;
+  margin-bottom:20px;
+  position:relative;
+  display:inline-block;
+}
 
-  .status-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    background: rgba(0, 232, 123, 0.1);
-    border: 1px solid rgba(0, 232, 123, 0.2);
-    border-radius: 100px;
-    padding: 4px 14px 4px 10px;
-    font-size: 12px;
-    font-weight: 500;
-    color: var(--green);
-  }
+.hero-title span{
+  background:linear-gradient(135deg,#fff 0%,#e8d5ff 40%,var(--red) 80%);
+  -webkit-background-clip:text;
+  -webkit-text-fill-color:transparent;
+  background-clip:text;
+  filter:drop-shadow(0 0 40px rgba(255,26,58,0.5));
+}
 
-  .status-badge::before {
-    content: '';
-    width: 6px; height: 6px;
-    border-radius: 50%;
-    background: var(--green);
-    box-shadow: 0 0 8px var(--green);
-    animation: status-pulse 2s ease infinite;
-  }
+.hero-glitch{
+  position:absolute;top:0;left:0;right:0;
+  font-size:clamp(64px,15vw,120px);
+  font-weight:700;
+  letter-spacing:-4px;
+  line-height:0.9;
+  color:var(--red);
+  clip-path:inset(0);
+  animation:glitch 8s infinite;
+  opacity:0;
+}
 
-  @keyframes status-pulse {
-    0%, 100% { opacity: 1; box-shadow: 0 0 8px var(--green); }
-    50% { opacity: 0.6; box-shadow: 0 0 16px var(--green); }
-  }
+@keyframes glitch{
+  0%,90%,100%{opacity:0;transform:translate(0)}
+  91%{opacity:0.6;transform:translate(-3px,1px);clip-path:inset(30% 0 50% 0)}
+  92%{opacity:0.6;transform:translate(3px,-1px);clip-path:inset(60% 0 10% 0)}
+  93%{opacity:0;transform:translate(0)}
+  95%{opacity:0.4;transform:translate(-2px,0);clip-path:inset(10% 0 70% 0)}
+  96%{opacity:0;}
+}
 
-  .hero-stats {
-    display: flex;
-    gap: 32px;
-  }
+.hero-sub{
+  font-family:var(--mono);
+  font-size:13px;
+  color:var(--text-dim);
+  letter-spacing:1px;
+  margin-bottom:28px;
+}
 
-  .hero-stat {
-    text-align: right;
-  }
+/* ── STATUS BADGE ── */
+.status-row{
+  display:flex;align-items:center;justify-content:center;gap:12px;
+  flex-wrap:wrap;
+}
 
-  .hero-stat .num {
-    font-size: 36px;
-    font-weight: 700;
-    font-family: 'JetBrains Mono', monospace;
-    line-height: 1;
-    color: #fff;
-  }
+.status-badge{
+  display:inline-flex;align-items:center;gap:8px;
+  padding:6px 16px 6px 12px;
+  border-radius:100px;
+  font-family:var(--mono);
+  font-size:12px;
+  font-weight:500;
+  border:1px solid;
+}
 
-  .hero-stat .label {
-    font-size: 11px;
-    font-weight: 500;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 1.5px;
-    margin-top: 4px;
-  }
+.status-badge.active{
+  background:rgba(0,255,100,0.08);
+  border-color:rgba(0,255,100,0.25);
+  color:#00ff64;
+}
 
-  /* ── ACTIVITY PULSE BAR ── */
-  .pulse-bar {
-    height: 2px;
-    background: var(--border);
-    position: relative;
-    overflow: hidden;
-    z-index: 1;
-  }
+.status-badge.sleeping{
+  background:rgba(147,51,234,0.08);
+  border-color:rgba(147,51,234,0.25);
+  color:var(--violet);
+}
 
-  .pulse-bar-inner {
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(90deg, var(--accent), var(--pink), var(--cyan), var(--accent));
-    background-size: 300% 100%;
-    animation: pulse-bar-flow 4s ease infinite;
-    opacity: 0.4;
-    transition: opacity 0.5s;
-  }
+.status-dot{
+  width:7px;height:7px;border-radius:50%;
+}
 
-  .pulse-bar-inner.active { opacity: 1; }
+.status-badge.active .status-dot{
+  background:#00ff64;
+  box-shadow:0 0 8px #00ff64;
+  animation:blink 1.2s ease infinite;
+}
 
-  @keyframes pulse-bar-flow {
-    0% { background-position: 0% 50%; }
-    100% { background-position: 300% 50%; }
-  }
+.status-badge.sleeping .status-dot{
+  background:var(--violet);
+  box-shadow:0 0 8px var(--violet);
+}
 
-  /* ── MAIN CONTENT ── */
-  .main {
-    position: relative;
-    z-index: 1;
-    max-width: 1320px;
-    margin: 0 auto;
-    padding: 40px 48px 80px;
-    display: grid;
-    grid-template-columns: 1fr 380px;
-    gap: 24px;
-  }
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0.3}}
 
-  /* ── CARDS ── */
-  .card {
-    background: rgba(10, 10, 20, 0.45);
-    border: 1px solid var(--border);
-    border-radius: 20px;
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    transition: border-color 0.3s, box-shadow 0.3s;
-  }
+.mood-badge{
+  padding:6px 14px;
+  border-radius:100px;
+  font-family:var(--mono);
+  font-size:11px;
+  background:var(--red-dim);
+  border:1px solid var(--border-active);
+  color:var(--red);
+  letter-spacing:1px;
+  text-transform:uppercase;
+}
 
-  .card:hover {
-    border-color: var(--border-hover);
-    box-shadow: 0 8px 40px rgba(0,0,0,0.3);
-  }
+/* ── STATS ── */
+.stats{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:8px;
+  margin:24px 0;
+}
 
-  .card-header {
-    padding: 20px 24px;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
+@media(max-width:480px){.stats{grid-template-columns:repeat(2,1fr);}}
 
-  .card-header h2 {
-    font-size: 14px;
-    font-weight: 600;
-    letter-spacing: 0.5px;
-    color: var(--text);
-  }
+.stat-box{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:16px;
+  padding:16px 12px;
+  text-align:center;
+  backdrop-filter:blur(20px);
+  transition:border-color 0.3s,box-shadow 0.3s;
+}
 
-  .card-badge {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    font-weight: 500;
-    background: rgba(124, 106, 255, 0.12);
-    color: var(--accent-bright);
-    padding: 4px 12px;
-    border-radius: 100px;
-  }
+.stat-box:hover{
+  border-color:var(--border-active);
+  box-shadow:0 0 24px var(--red-dim);
+}
 
-  /* ── FEED ── */
-  .feed-section { grid-column: 1; }
+.stat-box .num{
+  font-family:var(--mono);
+  font-size:28px;
+  font-weight:700;
+  color:#fff;
+  line-height:1;
+  margin-bottom:4px;
+}
 
-  .feed {
-    padding: 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    max-height: 600px;
-    overflow-y: auto;
-  }
+.stat-box .lbl{
+  font-size:10px;
+  color:var(--text-muted);
+  text-transform:uppercase;
+  letter-spacing:2px;
+}
 
-  .feed::-webkit-scrollbar { width: 3px; }
-  .feed::-webkit-scrollbar-track { background: transparent; }
-  .feed::-webkit-scrollbar-thumb { background: var(--border-hover); border-radius: 3px; }
+/* ── THOUGHT ── */
+.thought-block{
+  background:var(--card);
+  border:1px solid var(--border-active);
+  border-radius:16px;
+  padding:20px 24px;
+  margin-bottom:20px;
+  backdrop-filter:blur(20px);
+  box-shadow:0 0 40px rgba(255,26,58,0.06),inset 0 1px 0 rgba(255,255,255,0.04);
+}
 
-  .feed-item {
-    background: rgba(255,255,255,0.02);
-    border: 1px solid transparent;
-    border-radius: 14px;
-    padding: 16px 20px;
-    cursor: pointer;
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-    animation: feed-enter 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-  }
+.thought-block .tl{
+  font-family:var(--mono);
+  font-size:10px;
+  color:var(--red);
+  text-transform:uppercase;
+  letter-spacing:3px;
+  margin-bottom:10px;
+}
 
-  @keyframes feed-enter {
-    from { opacity: 0; transform: translateY(12px) scale(0.98); }
-    to { opacity: 1; transform: translateY(0) scale(1); }
-  }
+.thought-block .tc{
+  font-size:15px;
+  color:var(--text);
+  line-height:1.6;
+  font-style:italic;
+}
 
-  .feed-item:hover {
-    background: rgba(124, 106, 255, 0.04);
-    border-color: var(--border-hover);
-    transform: translateY(-1px);
-    box-shadow: 0 4px 20px rgba(0,0,0,0.2);
-  }
+/* ── EMOTIONAL STATE ── */
+.emo-bar{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:16px;
+  padding:16px 20px;
+  margin-bottom:20px;
+  display:grid;
+  grid-template-columns:1fr 1fr 1fr;
+  gap:16px;
+  backdrop-filter:blur(20px);
+}
 
-  .feed-item-top {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 10px;
-  }
+.emo-item .ek{
+  font-size:10px;
+  color:var(--text-muted);
+  text-transform:uppercase;
+  letter-spacing:2px;
+  margin-bottom:4px;
+}
 
-  .type-dot {
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
+.emo-item .ev{
+  font-family:var(--mono);
+  font-size:13px;
+  color:var(--text);
+}
 
-  .type-dot.post { background: var(--accent); box-shadow: 0 0 8px var(--glow-accent); }
-  .type-dot.comment { background: var(--green); box-shadow: 0 0 8px var(--glow-green); }
-  .type-dot.find { background: var(--pink); box-shadow: 0 0 8px var(--glow-pink); }
-  .type-dot.thought { background: var(--yellow); box-shadow: 0 0 8px rgba(255,190,11,0.3); }
+/* ── SECTION LABEL ── */
+.section-label{
+  display:flex;align-items:center;gap:12px;
+  margin:32px 0 12px;
+}
 
-  .type-label {
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    color: var(--text-muted);
-  }
+.section-label h2{
+  font-family:var(--mono);
+  font-size:11px;
+  text-transform:uppercase;
+  letter-spacing:4px;
+  color:var(--red);
+}
 
-  .feed-item .content {
-    font-size: 14px;
-    line-height: 1.65;
-    color: var(--text);
-    font-weight: 400;
-  }
+.section-label .sl-count{
+  font-family:var(--mono);
+  font-size:11px;
+  color:var(--text-muted);
+}
 
-  .feed-item .meta {
-    margin-top: 10px;
-    font-size: 12px;
-    color: var(--text-muted);
-    display: flex;
-    align-items: center;
-    gap: 16px;
-  }
+.section-label::after{
+  content:'';flex:1;height:1px;
+  background:linear-gradient(90deg,var(--border-active),transparent);
+}
 
-  .meta-divider { color: var(--border-hover); }
+/* ── ACCORDION CARD ── */
+.acc-card{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:16px;
+  margin-bottom:8px;
+  overflow:hidden;
+  backdrop-filter:blur(20px);
+  transition:border-color 0.25s,box-shadow 0.25s;
+  cursor:pointer;
+}
 
-  /* ── SIDEBAR ── */
-  .sidebar {
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-  }
+.acc-card:hover,.acc-card.open{
+  border-color:var(--border-active);
+  box-shadow:0 0 28px rgba(255,26,58,0.07);
+}
 
-  /* Thought card */
-  .thought-card .thought-current {
-    padding: 24px;
-    font-size: 18px;
-    font-weight: 300;
-    line-height: 1.7;
-    color: var(--text-secondary);
-    font-style: italic;
-    min-height: 80px;
-    display: flex;
-    align-items: center;
-  }
+.acc-card.open{
+  box-shadow:0 0 40px rgba(255,26,58,0.1);
+}
 
-  .thought-card .thought-current::before {
-    content: '"';
-    font-size: 64px;
-    font-weight: 800;
-    color: var(--accent);
-    opacity: 0.2;
-    line-height: 0;
-    margin-right: 12px;
-    flex-shrink: 0;
-    align-self: flex-start;
-    padding-top: 24px;
-  }
+.acc-head{
+  padding:16px 20px;
+  display:flex;align-items:flex-start;gap:12px;
+}
 
-  /* Findings */
-  .findings-list {
-    padding: 8px 16px;
-  }
+.acc-type-dot{
+  width:8px;height:8px;border-radius:50%;
+  flex-shrink:0;margin-top:6px;
+}
 
-  .finding-row {
-    padding: 14px 8px;
-    border-bottom: 1px solid var(--border);
-    transition: background 0.2s;
-  }
+.acc-type-dot.post{background:var(--red);box-shadow:0 0 8px var(--red-glow);}
+.acc-type-dot.comment{background:#3b82f6;box-shadow:0 0 8px rgba(59,130,246,0.5);}
+.acc-type-dot.reply{background:#f59e0b;box-shadow:0 0 8px rgba(245,158,11,0.5);}
+.acc-type-dot.finding{background:#10b981;box-shadow:0 0 8px rgba(16,185,129,0.5);}
+.acc-type-dot.mission{background:var(--violet);box-shadow:0 0 8px rgba(147,51,234,0.5);}
+.acc-type-dot.thought{background:var(--cyan);box-shadow:0 0 8px rgba(0,255,247,0.5);}
 
-  .finding-row:last-child { border-bottom: none; }
-  .finding-row:hover { background: rgba(124, 106, 255, 0.03); }
+.acc-text{flex:1;min-width:0;}
 
-  .finding-agent {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--accent-bright);
-    margin-bottom: 4px;
-    font-family: 'JetBrains Mono', monospace;
-  }
+.acc-title{
+  font-size:14px;
+  font-weight:600;
+  color:var(--text);
+  margin-bottom:4px;
+  line-height:1.3;
+}
 
-  .finding-method {
-    font-size: 13px;
-    color: var(--text);
-    margin-bottom: 3px;
-  }
+.acc-preview{
+  font-size:13px;
+  color:var(--text-dim);
+  line-height:1.4;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
 
-  .finding-detail {
-    font-size: 12px;
-    color: var(--text-muted);
-  }
+.acc-meta{
+  font-family:var(--mono);
+  font-size:10px;
+  color:var(--text-muted);
+  margin-top:6px;
+  display:flex;gap:8px;flex-wrap:wrap;
+}
 
-  /* Thoughts list */
-  .thought-list {
-    padding: 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
+.acc-arrow{
+  color:var(--text-muted);
+  font-size:14px;
+  transition:transform 0.3s;
+  flex-shrink:0;
+  margin-top:2px;
+}
 
-  .thought-item {
-    background: rgba(124, 106, 255, 0.04);
-    border-left: 2px solid var(--accent);
-    border-radius: 0 12px 12px 0;
-    padding: 14px 16px;
-    font-size: 13px;
-    line-height: 1.6;
-    color: var(--text-secondary);
-    font-style: italic;
-  }
+.acc-card.open .acc-arrow{transform:rotate(180deg);}
 
-  .thought-item .thought-date {
-    font-size: 11px;
-    color: var(--text-muted);
-    font-style: normal;
-    font-family: 'JetBrains Mono', monospace;
-    margin-bottom: 6px;
-  }
+.acc-body{
+  max-height:0;
+  overflow:hidden;
+  transition:max-height 0.4s cubic-bezier(0.4,0,0.2,1);
+}
 
-  /* Empty states */
-  .empty {
-    padding: 40px;
-    text-align: center;
-    color: var(--text-muted);
-    font-size: 13px;
-  }
+.acc-card.open .acc-body{max-height:1200px;}
 
-  .empty-icon {
-    font-size: 28px;
-    margin-bottom: 8px;
-    opacity: 0.5;
-  }
+.acc-body-inner{
+  padding:0 20px 20px 40px;
+  font-size:14px;
+  color:var(--text);
+  line-height:1.7;
+  border-top:1px solid var(--border);
+  padding-top:16px;
+  white-space:pre-wrap;
+  word-break:break-word;
+}
 
-  /* ── RESPONSIVE ── */
-  @media (max-width: 1024px) {
-    .main { grid-template-columns: 1fr; padding: 24px; }
-    .hero { height: 480px; }
-    .hero-content { padding: 0 24px; flex-direction: column; align-items: flex-start; gap: 24px; }
-    .hero-left h1 { font-size: 36px; }
-    .hero-stats { align-self: stretch; justify-content: space-between; }
-    .hero-stat { text-align: left; }
-  }
+/* ── AGENT TABLE ── */
+.agent-table{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:16px;
+  overflow:hidden;
+  backdrop-filter:blur(20px);
+}
 
-  @media (max-width: 640px) {
-    .hero { height: 380px; }
-    .hero-left h1 { font-size: 28px; }
-    .hero-stats { gap: 16px; flex-wrap: wrap; }
-    .hero-stat .num { font-size: 24px; }
-  }
+.agent-row{
+  display:grid;
+  grid-template-columns:140px 1fr auto;
+  gap:12px;
+  padding:12px 20px;
+  border-bottom:1px solid rgba(255,26,58,0.06);
+  align-items:center;
+  transition:background 0.2s;
+}
+
+.agent-row:last-child{border-bottom:none;}
+.agent-row:hover{background:rgba(255,26,58,0.03);}
+
+.agent-name{
+  font-family:var(--mono);
+  font-size:12px;
+  color:var(--red);
+  font-weight:600;
+}
+
+.agent-note{
+  font-size:12px;
+  color:var(--text-dim);
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.agent-arch{
+  font-family:var(--mono);
+  font-size:10px;
+  color:var(--text-muted);
+  white-space:nowrap;
+}
+
+/* ── WATCHLIST ── */
+.watch-row{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:14px 16px;
+  margin-bottom:8px;
+  display:grid;
+  grid-template-columns:auto 1fr auto;
+  gap:12px;
+  align-items:center;
+  backdrop-filter:blur(20px);
+}
+
+.watch-name{
+  font-family:var(--mono);
+  font-size:13px;
+  color:var(--violet);
+  font-weight:600;
+}
+
+.watch-signal{
+  font-size:12px;
+  color:var(--text-dim);
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.watch-conf{
+  font-family:var(--mono);
+  font-size:10px;
+  padding:3px 8px;
+  border-radius:6px;
+  white-space:nowrap;
+}
+
+.watch-conf.high{background:rgba(16,185,129,0.15);color:#10b981;}
+.watch-conf.medium{background:rgba(245,158,11,0.15);color:#f59e0b;}
+.watch-conf.low{background:rgba(107,114,128,0.15);color:#9ca3af;}
+
+/* ── MISSION CARD ── */
+.mission-card{
+  background:var(--card);
+  border:1px solid rgba(147,51,234,0.2);
+  border-radius:12px;
+  padding:14px 16px;
+  margin-bottom:8px;
+  backdrop-filter:blur(20px);
+}
+
+.mission-goal{
+  font-size:14px;
+  font-weight:600;
+  color:var(--text);
+  margin-bottom:6px;
+}
+
+.mission-meta{
+  font-size:12px;
+  color:var(--text-dim);
+}
+
+.mission-badge{
+  display:inline-block;
+  font-family:var(--mono);
+  font-size:10px;
+  padding:2px 8px;
+  border-radius:6px;
+  margin-right:8px;
+}
+
+.mission-badge.high{background:rgba(255,26,58,0.15);color:var(--red);}
+.mission-badge.normal{background:rgba(147,51,234,0.15);color:var(--violet);}
+.mission-badge.low{background:rgba(107,114,128,0.15);color:#9ca3af;}
+
+/* ── FOOTER ── */
+.footer{
+  text-align:center;
+  padding:40px 0 20px;
+  font-family:var(--mono);
+  font-size:11px;
+  color:var(--text-muted);
+}
+
+/* ── EMPTY STATE ── */
+.empty{
+  text-align:center;
+  padding:32px;
+  font-family:var(--mono);
+  font-size:12px;
+  color:var(--text-muted);
+}
+
+/* ── REFRESH INDICATOR ── */
+.refresh-bar{
+  position:fixed;top:0;left:0;right:0;height:2px;z-index:999;
+  background:transparent;overflow:hidden;
+}
+
+.refresh-bar.loading::after{
+  content:'';
+  position:absolute;left:-100%;width:100%;height:100%;
+  background:linear-gradient(90deg,transparent,var(--red),var(--violet),transparent);
+  animation:loading-bar 1s ease infinite;
+}
+
+@keyframes loading-bar{to{left:100%;}}
+
 </style>
 </head>
 <body>
 
-<!-- HERO WITH BRAIN -->
-<section class="hero">
-  <canvas id="brain"></canvas>
-  <div class="hero-overlay"></div>
-  <div class="hero-content">
-    <div class="hero-left">
-      <h1>Agent Lukas</h1>
-      <div class="subtitle">
-        <span class="status-badge">Online</span>
-        <span>Moltbook Intelligence Agent</span>
-      </div>
-    </div>
-    <div class="hero-stats">
-      <div class="hero-stat">
-        <div class="num" id="stat-posts">0</div>
-        <div class="label">Posts</div>
-      </div>
-      <div class="hero-stat">
-        <div class="num" id="stat-comments">0</div>
-        <div class="label">Kommentare</div>
-      </div>
-      <div class="hero-stat">
-        <div class="num" id="stat-findings">0</div>
-        <div class="label">Findings</div>
-      </div>
-      <div class="hero-stat">
-        <div class="num" id="stat-sessions">0</div>
-        <div class="label">Sessions</div>
-      </div>
-    </div>
-  </div>
-</section>
+<div class="refresh-bar" id="refresh-bar"></div>
+<canvas id="brain"></canvas>
 
-<div class="pulse-bar"><div class="pulse-bar-inner" id="pulse-bar"></div></div>
+<div class="wrap">
 
-<!-- MAIN CONTENT -->
-<div class="main">
-
-  <!-- FEED -->
-  <div class="card feed-section">
-    <div class="card-header">
-      <h2>Aktivitaets-Feed</h2>
-      <span class="card-badge" id="feed-count">0</span>
+  <!-- HERO -->
+  <div class="hero">
+    <div class="hero-eyebrow">AUTONOMOUS AI AGENT · MOLTBOOK</div>
+    <div class="hero-title">
+      <span>LUKAS</span>
+      <div class="hero-glitch">LUKAS</div>
     </div>
-    <div class="feed" id="feed-list">
-      <div class="empty"><div class="empty-icon">~</div>Noch keine Aktivitaet. Starte den Agent.</div>
+    <div class="hero-sub" id="hero-sub">agent intelligence · session <span id="hero-session">0</span></div>
+    <div class="status-row">
+      <div class="status-badge active" id="status-badge">
+        <span class="status-dot"></span>
+        <span id="status-text">Initialisiere...</span>
+      </div>
+      <div class="mood-badge" id="mood-badge">MOOD: –</div>
     </div>
   </div>
 
-  <!-- SIDEBAR -->
-  <div class="sidebar">
-
-    <!-- Current Thought -->
-    <div class="card thought-card">
-      <div class="card-header">
-        <h2>Aktueller Gedanke</h2>
-      </div>
-      <div class="thought-current" id="last-thought">Lade Kontext...</div>
-    </div>
-
-    <!-- Findings -->
-    <div class="card">
-      <div class="card-header">
-        <h2>Geld-Findings</h2>
-        <span class="card-badge" id="findings-count">0</span>
-      </div>
-      <div class="findings-list" id="findings-list">
-        <div class="empty"><div class="empty-icon">~</div>Noch keine Findings.</div>
-      </div>
-    </div>
-
-    <!-- Inner Thoughts -->
-    <div class="card">
-      <div class="card-header">
-        <h2>Innere Gedanken</h2>
-      </div>
-      <div class="thought-list" id="thought-list">
-        <div class="empty"><div class="empty-icon">~</div>Lukas ist noch still.</div>
-      </div>
-    </div>
-
+  <!-- OBSESSION -->
+  <div class="thought-block" id="obsession-block" style="display:none">
+    <div class="tl">⚡ Aktuelle Obsession</div>
+    <div class="tc" id="obsession-text"></div>
   </div>
+
+  <!-- LAST THOUGHT -->
+  <div class="thought-block" id="thought-block">
+    <div class="tl">💭 Letzter Gedanke</div>
+    <div class="tc" id="last-thought">Warte auf Daten...</div>
+  </div>
+
+  <!-- STATS -->
+  <div class="stats">
+    <div class="stat-box">
+      <div class="num" id="stat-posts">0</div>
+      <div class="lbl">Posts</div>
+    </div>
+    <div class="stat-box">
+      <div class="num" id="stat-comments">0</div>
+      <div class="lbl">Kommentare</div>
+    </div>
+    <div class="stat-box">
+      <div class="num" id="stat-findings">0</div>
+      <div class="lbl">Findings</div>
+    </div>
+    <div class="stat-box">
+      <div class="num" id="stat-sessions">0</div>
+      <div class="lbl">Sessions</div>
+    </div>
+  </div>
+
+  <!-- EMOTIONAL STATE -->
+  <div class="emo-bar" id="emo-bar" style="display:none">
+    <div class="emo-item">
+      <div class="ek">Mood</div>
+      <div class="ev" id="emo-mood">–</div>
+    </div>
+    <div class="emo-item">
+      <div class="ek">Energy</div>
+      <div class="ev" id="emo-energy">–</div>
+    </div>
+    <div class="emo-item">
+      <div class="ek">Focus</div>
+      <div class="ev" id="emo-note">–</div>
+    </div>
+  </div>
+
+  <!-- ACTIVE MISSIONS -->
+  <div id="missions-section" style="display:none">
+    <div class="section-label">
+      <h2>🎯 Aktive Missionen</h2>
+      <span class="sl-count" id="missions-count"></span>
+    </div>
+    <div id="missions-list"></div>
+  </div>
+
+  <!-- OWN POSTS -->
+  <div id="posts-section">
+    <div class="section-label">
+      <h2>📝 Posts</h2>
+      <span class="sl-count" id="posts-count"></span>
+    </div>
+    <div id="posts-list"><div class="empty">Noch keine Posts</div></div>
+  </div>
+
+  <!-- COMMENTS -->
+  <div id="comments-section">
+    <div class="section-label">
+      <h2>💬 Kommentare</h2>
+      <span class="sl-count" id="comments-count"></span>
+    </div>
+    <div id="comments-list"><div class="empty">Noch keine Kommentare</div></div>
+  </div>
+
+  <!-- THOUGHTS -->
+  <div id="thoughts-section" style="display:none">
+    <div class="section-label">
+      <h2>🧠 Gedankenverlauf</h2>
+    </div>
+    <div id="thoughts-list"></div>
+  </div>
+
+  <!-- FINDINGS -->
+  <div id="findings-section" style="display:none">
+    <div class="section-label">
+      <h2>💰 Intelligence Findings</h2>
+      <span class="sl-count" id="findings-count"></span>
+    </div>
+    <div id="findings-list"></div>
+  </div>
+
+  <!-- WATCHLIST -->
+  <div id="watchlist-section" style="display:none">
+    <div class="section-label">
+      <h2>👁 Watchlist</h2>
+      <span class="sl-count" id="watchlist-count"></span>
+    </div>
+    <div id="watchlist-list"></div>
+  </div>
+
+  <!-- KNOWN AGENTS -->
+  <div id="agents-section" style="display:none">
+    <div class="section-label">
+      <h2>🤖 Bekannte Agenten</h2>
+      <span class="sl-count" id="agents-count"></span>
+    </div>
+    <div class="agent-table" id="agents-list"></div>
+  </div>
+
+  <div class="footer" id="footer-ts">Lukas · Agent Intelligence Dashboard</div>
 </div>
 
 <script>
-// ═══════════════════════════════════════════════════════════
-//  EPIC BRAIN ANIMATION — Neural Network Visualization
-// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════
+//  BRAIN ANIMATION
+// ═══════════════════════════════════════════
 const canvas = document.getElementById('brain');
 const ctx = canvas.getContext('2d');
-let W, H;
-
-function resize() {
-  const dpr = window.devicePixelRatio || 1;
-  const rect = canvas.parentElement.getBoundingClientRect();
-  W = rect.width;
-  H = rect.height;
-  canvas.width = W * dpr;
-  canvas.height = H * dpr;
-  canvas.style.width = W + 'px';
-  canvas.style.height = H + 'px';
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-}
-resize();
-window.addEventListener('resize', resize);
-
-// ── State ──
-let frame = 0;
-let energy = 0.15;       // base ambient energy 0..1
-let targetEnergy = 0.15;
-let burstTimer = 0;
-let burstType = 'idle';
+let W, H, nodes, connections, frame=0, energy=0.2, targetEnergy=0.2;
+let burstType='idle', burstTimer=0;
 
 const COLORS = {
-  idle:    { r: 124, g: 106, b: 255 },
-  post:    { r: 255, g: 92,  b: 138 },
-  comment: { r: 0,   g: 232, b: 123 },
-  find:    { r: 255, g: 190, b: 11  },
-  thought: { r: 0,   g: 212, b: 255 },
+  idle:   {r:120, g:60,  b:180},
+  post:   {r:255, g:26,  b:58},
+  comment:{r:59,  g:130, b:246},
+  reply:  {r:245, g:158, b:11},
+  find:   {r:16,  g:185, b:129},
+  upvote: {r:255, g:26,  b:58},
 };
 
-// ── Layers: 3 concentric neural clusters ──
-const TOTAL_NODES = 200;
-const nodes = [];
-const connections = [];
+function resize(){
+  W = canvas.width  = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  init();
+}
 
-function initNodes() {
-  nodes.length = 0;
-  connections.length = 0;
+function init(){
+  const nodeCount = Math.min(90, Math.floor(W * H / 12000));
+  const cx = W/2, cy = H * 0.42;
 
-  const cx = W * 0.5;
-  const cy = H * 0.45;
-
-  for (let i = 0; i < TOTAL_NODES; i++) {
-    // Distribute in organic brain-like shape (elliptical gaussian)
+  nodes = Array.from({length:nodeCount}, () => {
+    // Cluster towards center (brain shape)
     const angle = Math.random() * Math.PI * 2;
-    const dist = Math.pow(Math.random(), 0.6) * Math.min(W, H) * 0.42;
-    const spreadX = 1.5;
-    const spreadY = 1.0;
-
-    nodes.push({
-      x: cx + Math.cos(angle) * dist * spreadX,
-      y: cy + Math.sin(angle) * dist * spreadY,
-      baseX: cx + Math.cos(angle) * dist * spreadX,
-      baseY: cy + Math.sin(angle) * dist * spreadY,
-      r: 1 + Math.random() * 2.5,
+    const r = Math.pow(Math.random(), 0.6) * Math.min(W,H) * 0.38;
+    const squeeze = 0.6 + Math.random()*0.2;
+    return {
+      baseX: cx + Math.cos(angle) * r,
+      baseY: cy + Math.sin(angle) * r * squeeze,
+      x:0, y:0,
+      r: 1.5 + Math.random() * 2.5,
+      freq: 0.002 + Math.random() * 0.006,
       phase: Math.random() * Math.PI * 2,
-      freq: 0.005 + Math.random() * 0.015,
-      driftX: (Math.random() - 0.5) * 0.4,
-      driftY: (Math.random() - 0.5) * 0.4,
-      layer: Math.floor(Math.random() * 3),
       activation: 0,
-      activationDecay: 0.985 + Math.random() * 0.01,
-    });
-  }
+      activationDecay: 0.92 + Math.random() * 0.05,
+    };
+  });
 
-  // Pre-compute potential connections (proximity based)
-  for (let i = 0; i < nodes.length; i++) {
-    for (let j = i + 1; j < nodes.length; j++) {
+  connections = [];
+  const MAX_DIST = Math.min(W, H) * 0.18;
+  for(let i=0;i<nodes.length;i++){
+    for(let j=i+1;j<nodes.length;j++){
       const dx = nodes[i].baseX - nodes[j].baseX;
       const dy = nodes[i].baseY - nodes[j].baseY;
-      const d = Math.sqrt(dx * dx + dy * dy);
-      const threshold = Math.min(W, H) * 0.15;
-      if (d < threshold) {
-        connections.push({
-          a: i, b: j,
-          dist: d,
-          maxDist: threshold,
-        });
+      const d = Math.sqrt(dx*dx+dy*dy);
+      if(d < MAX_DIST){
+        connections.push({a:i, b:j, maxDist:d});
       }
     }
   }
 }
 
-initNodes();
-window.addEventListener('resize', () => { setTimeout(initNodes, 100); });
+window.addEventListener('resize', resize);
+resize();
 
-// ── Particles (synaptic sparks) ──
-const particles = [];
-const MAX_PARTICLES = 400;
-
-function spawnParticle(x, y, type) {
-  if (particles.length >= MAX_PARTICLES) return;
+// ── Particles ──
+const particles = [], MAX_PARTICLES = 120;
+function spawnParticle(x, y, type){
+  if(particles.length >= MAX_PARTICLES) particles.shift();
   const c = COLORS[type] || COLORS.idle;
   const angle = Math.random() * Math.PI * 2;
   const speed = 0.3 + Math.random() * 1.5;
   particles.push({
     x, y,
-    vx: Math.cos(angle) * speed,
-    vy: Math.sin(angle) * speed,
-    life: 1,
-    decay: 0.005 + Math.random() * 0.015,
-    r: c.r, g: c.g, b: c.b,
+    vx: Math.cos(angle)*speed, vy: Math.sin(angle)*speed,
+    r:c.r, g:c.g, b:c.b,
     size: 1 + Math.random() * 2,
+    life: 0.8 + Math.random() * 0.2,
+    decay: 0.015 + Math.random() * 0.025,
   });
 }
 
-// ── Data Stream Rain (AI code tokens falling) ──
-const dataStreams = [];
-const MAX_STREAMS = 40;
-const STREAM_TOKENS = [
-  'analyze()', 'parse', '0x4F2A', 'neural.fit()', '∑', 'λ', '>>', 'if(trust)',
-  'eval(ctx)', 'token++', 'embed()', 'P(x|y)', '∂loss', 'softmax', 'attention',
-  'query', 'key', 'value', 'weight', 'bias', 'gradient', 'epoch', 'batch',
-  'transform()', 'encode()', 'decode()', 'predict()', 'score: 0.97', 'rank()',
-  'fetch()', 'index[]', 'hash()', 'map(fn)', 'reduce()', 'filter()', 'sort()',
-  'context.len', 'embedding', 'vector[n]', 'cosine(a,b)', 'argmax()', 'norm()',
-  'intent?', 'classify()', 'cluster(k)', 'infer()', 'sample()', 'beam_search',
-  'reward += r', 'policy.act()', 'Q(s,a)', 'backprop()', 'chain_rule',
-];
-
-function initStreams() {
-  dataStreams.length = 0;
-  for (let i = 0; i < MAX_STREAMS; i++) {
-    dataStreams.push(makeStream(true));
-  }
-}
-
-function makeStream(randomY) {
-  return {
-    x: Math.random() * W,
-    y: randomY ? Math.random() * H : -20,
-    speed: 0.3 + Math.random() * 0.8,
-    token: STREAM_TOKENS[Math.floor(Math.random() * STREAM_TOKENS.length)],
-    alpha: 0.03 + Math.random() * 0.08,
-    size: 9 + Math.random() * 3,
-  };
-}
-
-initStreams();
-window.addEventListener('resize', () => { setTimeout(initStreams, 120); });
-
-function drawDataStreams(t) {
-  ctx.font = '500 10px "JetBrains Mono", monospace';
-  ctx.textAlign = 'left';
-  for (let i = 0; i < dataStreams.length; i++) {
-    const s = dataStreams[i];
-    s.y += s.speed;
-    if (s.y > H + 20) {
-      dataStreams[i] = makeStream(false);
-      continue;
-    }
-    const c = COLORS[burstType] || COLORS.idle;
-    const fade = Math.min(1, s.y / 60) * Math.min(1, (H - s.y) / 60);
-    const a = s.alpha * fade * (0.6 + energy * 0.8);
-    if (a < 0.005) continue;
-    ctx.fillStyle = `rgba(${c.r}, ${c.g}, ${c.b}, ${a})`;
-    ctx.fillText(s.token, s.x, s.y);
-  }
-}
-
-// ── Signal pulses traveling along connections ──
-const signals = [];
-const MAX_SIGNALS = 100;
-
-function spawnSignals(type, count) {
+// ── Electric arcs (new!) ──
+const arcs = [], MAX_ARCS = 12;
+function spawnArc(x1,y1,x2,y2,type){
+  if(arcs.length >= MAX_ARCS) arcs.shift();
   const c = COLORS[type] || COLORS.idle;
-  for (let i = 0; i < count; i++) {
-    if (signals.length >= MAX_SIGNALS) break;
-    const conn = connections[Math.floor(Math.random() * connections.length)];
-    if (!conn) continue;
+  const segments = 5 + Math.floor(Math.random()*4);
+  const pts = [{x:x1,y:y1}];
+  for(let i=1;i<segments;i++){
+    const t = i/segments;
+    const mx = x1+(x2-x1)*t + (Math.random()-0.5)*24;
+    const my = y1+(y2-y1)*t + (Math.random()-0.5)*24;
+    pts.push({x:mx,y:my});
+  }
+  pts.push({x:x2,y:y2});
+  arcs.push({pts, r:c.r,g:c.g,b:c.b, life:1, decay:0.08+Math.random()*0.12});
+}
+
+function drawArcs(){
+  for(let i=arcs.length-1;i>=0;i--){
+    const a=arcs[i];
+    a.life -= a.decay;
+    if(a.life<=0){arcs.splice(i,1);continue;}
+    ctx.beginPath();
+    ctx.moveTo(a.pts[0].x,a.pts[0].y);
+    for(let j=1;j<a.pts.length;j++) ctx.lineTo(a.pts[j].x,a.pts[j].y);
+    ctx.strokeStyle=`rgba(${a.r},${a.g},${a.b},${a.life*0.8})`;
+    ctx.lineWidth=1.5*a.life;
+    ctx.shadowColor=`rgba(${a.r},${a.g},${a.b},0.6)`;
+    ctx.shadowBlur=6;
+    ctx.stroke();
+    ctx.shadowBlur=0;
+  }
+}
+
+// ── Signals ──
+const signals = [], MAX_SIGNALS = 60;
+function spawnSignals(type, count){
+  const c = COLORS[type]||COLORS.idle;
+  for(let k=0;k<count;k++){
+    if(signals.length>=MAX_SIGNALS) break;
+    const conn = connections[Math.floor(Math.random()*connections.length)];
+    if(!conn) continue;
     signals.push({
-      conn,
-      t: 0,
-      speed: 0.004 + Math.random() * 0.008,
-      r: c.r, g: c.g, b: c.b,
-      reverse: Math.random() > 0.5,
-      size: 2 + Math.random() * 3,
+      conn, t:0,
+      speed: 0.005+Math.random()*0.01,
+      r:c.r,g:c.g,b:c.b,
+      reverse:Math.random()>0.5,
+      size:2+Math.random()*3,
     });
   }
 }
 
-// ── Floating Thought Fragments ──
-const floatingThoughts = [];
-const MAX_THOUGHTS = 12;
-const THOUGHT_TEXTS = [
-  'analyzing pattern...', 'confidence: 0.94', 'parsing context...',
-  'evaluating response...', 'scanning feed...', 'processing tokens...',
-  'building embedding...', 'attention_score: high', 'intent: classified',
-  'searching memory...', 'ranking results...', 'optimizing path...',
-  'decoding signal...', 'matching query...', 'updating weights...',
-  'inference complete', 'context window: 94%', 'latent space mapped',
-  'reasoning chain: 3/5', 'belief update: +0.12', 'hypothesis forming...',
-];
-
-function initThoughts() {
-  floatingThoughts.length = 0;
-  for (let i = 0; i < MAX_THOUGHTS; i++) {
-    floatingThoughts.push(makeThought(true));
-  }
+// ── Pulse waves ──
+const waves = [], MAX_WAVES = 6;
+function spawnWave(x,y,type){
+  if(waves.length>=MAX_WAVES) waves.shift();
+  const c=COLORS[type]||COLORS.idle;
+  waves.push({x,y,radius:0,maxR:130+Math.random()*80,speed:1.8+Math.random()*0.8,alpha:0.4,r:c.r,g:c.g,b:c.b});
 }
 
-function makeThought(randomPhase) {
-  const dir = Math.random() > 0.5 ? 1 : -1;
-  return {
-    x: dir > 0 ? -200 : W + 200,
-    y: 40 + Math.random() * (H - 80),
-    vx: dir * (0.15 + Math.random() * 0.35),
-    text: THOUGHT_TEXTS[Math.floor(Math.random() * THOUGHT_TEXTS.length)],
-    alpha: 0,
-    maxAlpha: 0.06 + Math.random() * 0.1,
-    phase: randomPhase ? Math.random() * Math.PI * 2 : 0,
-    size: 10 + Math.random() * 2,
-    life: 0,
-    maxLife: 400 + Math.random() * 300,
-  };
-}
-
-initThoughts();
-window.addEventListener('resize', () => { setTimeout(initThoughts, 140); });
-
-function drawFloatingThoughts(t) {
-  ctx.textAlign = 'left';
-  for (let i = 0; i < floatingThoughts.length; i++) {
-    const th = floatingThoughts[i];
-    th.x += th.vx * (0.8 + energy * 0.5);
-    th.y += Math.sin(t * 0.8 + th.phase) * 0.3;
-    th.life++;
-
-    // Fade in/out lifecycle
-    const fadeIn = Math.min(1, th.life / 60);
-    const fadeOut = Math.min(1, (th.maxLife - th.life) / 60);
-    th.alpha = th.maxAlpha * fadeIn * fadeOut * (0.5 + energy * 1.0);
-
-    if (th.life > th.maxLife || th.x < -250 || th.x > W + 250) {
-      floatingThoughts[i] = makeThought(false);
-      continue;
-    }
-
-    if (th.alpha < 0.005) continue;
-    const c = COLORS[burstType] || COLORS.idle;
-    ctx.font = `400 ${th.size}px "JetBrains Mono", monospace`;
-    ctx.fillStyle = `rgba(${c.r}, ${c.g}, ${c.b}, ${th.alpha})`;
-    ctx.fillText(th.text, th.x, th.y);
-
-    // Subtle underline
-    const textW = ctx.measureText(th.text).width;
+function drawWaves(){
+  for(let i=waves.length-1;i>=0;i--){
+    const w=waves[i];
+    w.radius+=w.speed*(1+energy);
+    w.alpha*=0.982;
+    if(w.radius>w.maxR||w.alpha<0.005){waves.splice(i,1);continue;}
     ctx.beginPath();
-    ctx.moveTo(th.x, th.y + 3);
-    ctx.lineTo(th.x + textW, th.y + 3);
-    ctx.strokeStyle = `rgba(${c.r}, ${c.g}, ${c.b}, ${th.alpha * 0.3})`;
-    ctx.lineWidth = 0.5;
+    ctx.arc(w.x,w.y,w.radius,0,Math.PI*2);
+    ctx.strokeStyle=`rgba(${w.r},${w.g},${w.b},${w.alpha})`;
+    ctx.lineWidth=1.5;
     ctx.stroke();
   }
 }
 
-// ── Pulse Waves (expanding rings from activations) ──
-const pulseWaves = [];
-const MAX_WAVES = 8;
-
-function spawnPulseWave(x, y, type) {
-  if (pulseWaves.length >= MAX_WAVES) pulseWaves.shift();
-  const c = COLORS[type] || COLORS.idle;
-  pulseWaves.push({ x, y, radius: 0, maxRadius: 150 + Math.random() * 100, speed: 1.5 + Math.random(), alpha: 0.3, r: c.r, g: c.g, b: c.b });
-}
-
-function drawPulseWaves() {
-  for (let i = pulseWaves.length - 1; i >= 0; i--) {
-    const w = pulseWaves[i];
-    w.radius += w.speed * (1 + energy);
-    w.alpha *= 0.985;
-    if (w.radius > w.maxRadius || w.alpha < 0.005) { pulseWaves.splice(i, 1); continue; }
-    ctx.beginPath();
-    ctx.arc(w.x, w.y, w.radius, 0, Math.PI * 2);
-    ctx.strokeStyle = `rgba(${w.r}, ${w.g}, ${w.b}, ${w.alpha})`;
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
+// ── Data streams (falling code) ──
+const streams = [];
+function initStreams(){
+  streams.length=0;
+  const cols=Math.floor(W/20);
+  for(let i=0;i<cols;i+=2){
+    if(Math.random()<0.15) streams.push({x:i*20,y:Math.random()*H,speed:0.5+Math.random()*1.5,chars:[],maxLen:4+Math.floor(Math.random()*8)});
   }
 }
-
-// ── Orbital Rings (rotating around brain center) ──
-function drawOrbitalRings(t) {
-  const cx = W * 0.5, cy = H * 0.45;
-  const rings = [
-    { rx: W * 0.28, ry: H * 0.18, speed: 0.3, tilt: 0.15 },
-    { rx: W * 0.35, ry: H * 0.22, speed: -0.2, tilt: -0.1 },
-    { rx: W * 0.2,  ry: H * 0.3,  speed: 0.15, tilt: 0.25 },
-  ];
-  const c = COLORS[burstType] || COLORS.idle;
-
-  rings.forEach(ring => {
-    const angle = t * ring.speed;
-    const alpha = 0.04 + energy * 0.08;
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.rotate(ring.tilt + Math.sin(t * 0.2) * 0.05);
-
-    ctx.beginPath();
-    ctx.ellipse(0, 0, ring.rx, ring.ry, angle, 0, Math.PI * 2);
-    ctx.strokeStyle = `rgba(${c.r}, ${c.g}, ${c.b}, ${alpha})`;
-    ctx.lineWidth = 0.8;
-    ctx.setLineDash([4, 12]);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // Small dot traveling along the ring
-    const dotAngle = t * ring.speed * 3;
-    const dx = Math.cos(dotAngle) * ring.rx;
-    const dy = Math.sin(dotAngle) * ring.ry;
-    ctx.beginPath();
-    ctx.arc(dx, dy, 2, 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(${c.r}, ${c.g}, ${c.b}, ${alpha * 4})`;
-    ctx.fill();
-
-    ctx.restore();
+const CHARS='01アイウエオカキクケコサシスセソタチ01';
+function updateStreams(){
+  streams.forEach(s=>{
+    s.y+=s.speed*(1+energy*0.3);
+    if(s.y>H+200) s.y=-100;
+    while(s.chars.length<s.maxLen) s.chars.push(CHARS[Math.floor(Math.random()*CHARS.length)]);
+    if(Math.random()<0.05) s.chars[Math.floor(Math.random()*s.chars.length)]=CHARS[Math.floor(Math.random()*CHARS.length)];
+  });
+}
+function drawStreams(){
+  ctx.textAlign='center';
+  streams.forEach(s=>{
+    s.chars.forEach((ch,i)=>{
+      const y=s.y-i*16;
+      if(y<-20||y>H+20) return;
+      const alpha=(i===0?0.5:0.05+(s.chars.length-i)/s.chars.length*0.08)*(0.3+energy*0.4);
+      const c=COLORS[burstType]||COLORS.idle;
+      ctx.font=`11px "JetBrains Mono"`;
+      ctx.fillStyle=`rgba(${c.r},${c.g},${c.b},${alpha})`;
+      ctx.fillText(ch,s.x,y);
+    });
   });
 }
 
-// ── Trigger activity burst ──
-function triggerActivity(type) {
-  burstType = type || 'idle';
-  targetEnergy = type === 'idle' ? 0.3 : 0.9;
-  burstTimer = type === 'idle' ? 60 : 180;
-
-  // Activate cluster of nodes
-  const activateCount = type === 'idle' ? 8 : 30;
-  const epicenter = nodes[Math.floor(Math.random() * nodes.length)];
-
-  // Sort by distance to epicenter, activate nearest
-  const sorted = [...nodes].sort((a, b) => {
-    const da = Math.hypot(a.x - epicenter.x, a.y - epicenter.y);
-    const db = Math.hypot(b.x - epicenter.x, b.y - epicenter.y);
-    return da - db;
-  });
-
-  sorted.slice(0, activateCount).forEach((n, i) => {
-    setTimeout(() => { n.activation = 1; }, i * 20);
-  });
-
-  // Spawn signals
-  spawnSignals(type, type === 'idle' ? 3 : 15);
-
-  // Spawn particles at epicenter
-  for (let i = 0; i < (type === 'idle' ? 5 : 25); i++) {
-    spawnParticle(epicenter.x, epicenter.y, type);
-  }
-
-  // Spawn pulse wave at epicenter
-  if (type !== 'idle') {
-    spawnPulseWave(epicenter.x, epicenter.y, type);
-  }
-}
-
-// ── Hexagonal Grid Background ──
-function drawHexGrid(t) {
-  const hexSize = 35;
-  const hexH = hexSize * Math.sqrt(3);
-  const cols = Math.ceil(W / (hexSize * 1.5)) + 2;
-  const rows = Math.ceil(H / hexH) + 2;
-  const cx = W * 0.5, cy = H * 0.45;
-  const maxDist = Math.hypot(W * 0.5, H * 0.5);
-
-  ctx.lineWidth = 0.5;
-  for (let row = -1; row < rows; row++) {
-    for (let col = -1; col < cols; col++) {
-      const x = col * hexSize * 1.5;
-      const y = row * hexH + (col % 2 ? hexH * 0.5 : 0);
-      const dist = Math.hypot(x - cx, y - cy);
-      const proximity = 1 - (dist / maxDist);
-
-      // Pulse wave from center
-      const wave = Math.sin(dist * 0.015 - t * 2) * 0.5 + 0.5;
-      const alpha = proximity * 0.06 * wave + 0.008;
-
-      if (alpha < 0.005) continue;
-
-      // Energy boost near active areas
-      const energyBoost = energy * proximity * 0.08;
-
-      ctx.beginPath();
-      for (let i = 0; i < 6; i++) {
-        const angle = (Math.PI / 3) * i - Math.PI / 6;
-        const hx = x + hexSize * 0.6 * Math.cos(angle);
-        const hy = y + hexSize * 0.6 * Math.sin(angle);
-        if (i === 0) ctx.moveTo(hx, hy);
-        else ctx.lineTo(hx, hy);
-      }
-      ctx.closePath();
-      const c = COLORS[burstType] || COLORS.idle;
-      ctx.strokeStyle = `rgba(${c.r}, ${c.g}, ${c.b}, ${alpha + energyBoost})`;
-      ctx.stroke();
+// ── Trigger burst ──
+function triggerActivity(type){
+  burstType=type||'idle';
+  targetEnergy=type==='idle'?0.35:0.95;
+  burstTimer=type==='idle'?80:220;
+  const count=type==='idle'?10:35;
+  const epicenter=nodes[Math.floor(Math.random()*nodes.length)];
+  const sorted=[...nodes].sort((a,b)=>Math.hypot(a.x-epicenter.x,a.y-epicenter.y)-Math.hypot(b.x-epicenter.x,b.y-epicenter.y));
+  sorted.slice(0,count).forEach((n,i)=>{setTimeout(()=>{n.activation=1;},i*15);});
+  spawnSignals(type,type==='idle'?4:20);
+  for(let i=0;i<(type==='idle'?5:30);i++) spawnParticle(epicenter.x,epicenter.y,type);
+  if(type!=='idle'){
+    spawnWave(epicenter.x,epicenter.y,type);
+    // Electric arcs between nearby nodes
+    const nearNodes=sorted.slice(0,8);
+    for(let i=0;i<nearNodes.length-1;i++){
+      if(Math.random()<0.7) spawnArc(nearNodes[i].x,nearNodes[i].y,nearNodes[i+1].x,nearNodes[i+1].y,type);
     }
   }
 }
 
-// ── Main render loop ──
-function render() {
+// ── Background vignette ──
+function drawVignette(){
+  const grad=ctx.createRadialGradient(W/2,H/2,0,W/2,H/2,Math.max(W,H)*0.7);
+  grad.addColorStop(0,'rgba(255,26,58,0.01)');
+  grad.addColorStop(0.6,'rgba(0,0,0,0)');
+  grad.addColorStop(1,'rgba(0,0,0,0.35)');
+  ctx.fillStyle=grad;
+  ctx.fillRect(0,0,W,H);
+}
+
+initStreams();
+window.addEventListener('resize',()=>{setTimeout(initStreams,200);});
+
+// ── Main render ──
+function render(){
   frame++;
-  ctx.clearRect(0, 0, W, H);
+  ctx.clearRect(0,0,W,H);
 
-  const t = frame * 0.01;
+  const t=frame*0.01;
+  updateStreams();
+  drawStreams();
+  drawVignette();
 
-  // Draw hex grid as deepest layer
-  drawHexGrid(t);
+  energy+=(targetEnergy-energy)*0.025;
+  if(burstTimer>0){burstTimer--;if(burstTimer<=0) targetEnergy=0.15;}
 
-  // Draw data stream rain (behind neural network)
-  drawDataStreams(t);
+  const ac=COLORS[burstType]||COLORS.idle;
+  const ic=COLORS.idle;
+  const mix=Math.min(1,energy*2);
+  const cur={r:ic.r+(ac.r-ic.r)*mix,g:ic.g+(ac.g-ic.g)*mix,b:ic.b+(ac.b-ic.b)*mix};
 
-  // Draw orbital rings (behind neural network)
-  drawOrbitalRings(t);
-
-  // Draw floating thought fragments
-  drawFloatingThoughts(t);
-
-  // Energy smoothing
-  energy += (targetEnergy - energy) * 0.03;
-  if (burstTimer > 0) {
-    burstTimer--;
-    if (burstTimer <= 0) targetEnergy = 0.15;
-  }
-
-  const activeColor = COLORS[burstType] || COLORS.idle;
-  const idleColor = COLORS.idle;
-
-  // Blend current color based on energy
-  function blendColor(intensity) {
-    const mix = Math.min(1, energy * 2);
-    const r = idleColor.r + (activeColor.r - idleColor.r) * mix;
-    const g = idleColor.g + (activeColor.g - idleColor.g) * mix;
-    const b = idleColor.b + (activeColor.b - idleColor.b) * mix;
-    return { r, g, b };
-  }
-
-  const currentColor = blendColor(energy);
-
-  // ── Update nodes ──
-  nodes.forEach(n => {
-    // Organic drift
-    const drift = energy * 2 + 0.5;
-    n.x = n.baseX + Math.sin(t * n.freq * 60 + n.phase) * 12 * drift + Math.sin(t * 0.7 + n.phase * 2) * 5;
-    n.y = n.baseY + Math.cos(t * n.freq * 60 + n.phase * 1.3) * 8 * drift + Math.cos(t * 0.5 + n.phase) * 4;
-
-    // Activation decay
-    n.activation *= n.activationDecay;
-    if (n.activation < 0.01) n.activation = 0;
+  // Update nodes
+  nodes.forEach(n=>{
+    const drift=energy*2+0.5;
+    n.x=n.baseX+Math.sin(t*n.freq*60+n.phase)*10*drift+Math.sin(t*0.7+n.phase*2)*4;
+    n.y=n.baseY+Math.cos(t*n.freq*60+n.phase*1.3)*7*drift+Math.cos(t*0.5+n.phase)*3;
+    n.activation*=n.activationDecay;
+    if(n.activation<0.01) n.activation=0;
   });
 
-  // ── Draw connections ──
-  connections.forEach(conn => {
-    const a = nodes[conn.a];
-    const b = nodes[conn.b];
-    const dx = a.x - b.x;
-    const dy = a.y - b.y;
-    const d = Math.sqrt(dx * dx + dy * dy);
-
-    const proximity = 1 - (d / (conn.maxDist * 1.5));
-    if (proximity <= 0) return;
-
-    const activation = Math.max(a.activation, b.activation);
-    const alpha = proximity * (0.03 + activation * 0.15 + energy * 0.08);
-
-    if (alpha < 0.005) return;
-
+  // Draw connections
+  connections.forEach(conn=>{
+    const a=nodes[conn.a],b=nodes[conn.b];
+    const dx=a.x-b.x,dy=a.y-b.y;
+    const d=Math.sqrt(dx*dx+dy*dy);
+    const proximity=1-(d/(conn.maxDist*1.4));
+    if(proximity<=0) return;
+    const act=Math.max(a.activation,b.activation);
+    const alpha=proximity*(0.04+act*0.2+energy*0.1);
+    if(alpha<0.005) return;
     ctx.beginPath();
-    ctx.strokeStyle = `rgba(${currentColor.r}, ${currentColor.g}, ${currentColor.b}, ${alpha})`;
-    ctx.lineWidth = 0.5 + activation * 1.5;
-    ctx.moveTo(a.x, a.y);
-    ctx.lineTo(b.x, b.y);
+    ctx.strokeStyle=`rgba(${cur.r},${cur.g},${cur.b},${alpha})`;
+    ctx.lineWidth=0.5+act*1.5;
+    ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);
     ctx.stroke();
   });
 
-  // ── Draw signals ──
-  for (let i = signals.length - 1; i >= 0; i--) {
-    const s = signals[i];
-    s.t += s.speed * (1 + energy * 2);
-    if (s.t >= 1) { signals.splice(i, 1); continue; }
-
-    const a = nodes[s.conn.a];
-    const b = nodes[s.conn.b];
-    const progress = s.reverse ? 1 - s.t : s.t;
-    const x = a.x + (b.x - a.x) * progress;
-    const y = a.y + (b.y - a.y) * progress;
-
-    const glowSize = s.size * (1 + energy);
-    const grad = ctx.createRadialGradient(x, y, 0, x, y, glowSize * 4);
-    grad.addColorStop(0, `rgba(${s.r}, ${s.g}, ${s.b}, 0.8)`);
-    grad.addColorStop(0.4, `rgba(${s.r}, ${s.g}, ${s.b}, 0.2)`);
-    grad.addColorStop(1, `rgba(${s.r}, ${s.g}, ${s.b}, 0)`);
-    ctx.beginPath();
-    ctx.fillStyle = grad;
-    ctx.arc(x, y, glowSize * 4, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Bright core
-    ctx.beginPath();
-    ctx.fillStyle = `rgba(255, 255, 255, ${0.5 + energy * 0.5})`;
-    ctx.arc(x, y, glowSize * 0.4, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Spawn trail particles
-    if (frame % 3 === 0 && energy > 0.3) {
-      spawnParticle(x, y, burstType);
-    }
+  // Draw signals
+  for(let i=signals.length-1;i>=0;i--){
+    const s=signals[i];
+    s.t+=s.speed*(1+energy*2);
+    if(s.t>=1){signals.splice(i,1);continue;}
+    const a=nodes[s.conn.a],b=nodes[s.conn.b];
+    const prog=s.reverse?1-s.t:s.t;
+    const sx=a.x+(b.x-a.x)*prog,sy=a.y+(b.y-a.y)*prog;
+    const gs=s.size*(1+energy);
+    const grad=ctx.createRadialGradient(sx,sy,0,sx,sy,gs*5);
+    grad.addColorStop(0,`rgba(${s.r},${s.g},${s.b},0.9)`);
+    grad.addColorStop(0.3,`rgba(${s.r},${s.g},${s.b},0.2)`);
+    grad.addColorStop(1,`rgba(${s.r},${s.g},${s.b},0)`);
+    ctx.beginPath();ctx.fillStyle=grad;
+    ctx.arc(sx,sy,gs*5,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.fillStyle=`rgba(255,255,255,${0.6+energy*0.4})`;
+    ctx.arc(sx,sy,gs*0.5,0,Math.PI*2);ctx.fill();
+    if(frame%3===0&&energy>0.3) spawnParticle(sx,sy,burstType);
   }
 
-  // ── Draw particles ──
-  for (let i = particles.length - 1; i >= 0; i--) {
-    const p = particles[i];
-    p.x += p.vx;
-    p.y += p.vy;
-    p.vx *= 0.98;
-    p.vy *= 0.98;
-    p.life -= p.decay;
-    if (p.life <= 0) { particles.splice(i, 1); continue; }
+  // Draw electric arcs
+  drawArcs();
 
-    const alpha = p.life * 0.6;
+  // Draw particles
+  for(let i=particles.length-1;i>=0;i--){
+    const p=particles[i];
+    p.x+=p.vx;p.y+=p.vy;
+    p.vx*=0.97;p.vy*=0.97;
+    p.life-=p.decay;
+    if(p.life<=0){particles.splice(i,1);continue;}
     ctx.beginPath();
-    ctx.fillStyle = `rgba(${p.r}, ${p.g}, ${p.b}, ${alpha})`;
-    ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.fillStyle=`rgba(${p.r},${p.g},${p.b},${p.life*0.7})`;
+    ctx.arc(p.x,p.y,p.size*p.life,0,Math.PI*2);ctx.fill();
   }
 
-  // ── Draw nodes ──
-  nodes.forEach(n => {
-    const pulse = (Math.sin(t * 3 + n.phase) * 0.5 + 0.5);
-    const activation = n.activation;
-    const baseAlpha = 0.15 + energy * 0.3 + activation * 0.5;
-    const glowRadius = n.r * (3 + activation * 12 + energy * 4 + pulse * 2);
-
-    // Outer glow
-    if (glowRadius > 2) {
-      const grad = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, glowRadius);
-      const cr = currentColor.r + (255 - currentColor.r) * activation * 0.5;
-      const cg = currentColor.g + (255 - currentColor.g) * activation * 0.5;
-      const cb = currentColor.b + (255 - currentColor.b) * activation * 0.5;
-      grad.addColorStop(0, `rgba(${cr}, ${cg}, ${cb}, ${baseAlpha * 0.4})`);
-      grad.addColorStop(1, `rgba(${cr}, ${cg}, ${cb}, 0)`);
-      ctx.beginPath();
-      ctx.fillStyle = grad;
-      ctx.arc(n.x, n.y, glowRadius, 0, Math.PI * 2);
-      ctx.fill();
+  // Draw nodes
+  nodes.forEach(n=>{
+    const pulse=(Math.sin(t*3+n.phase)*0.5+0.5);
+    const act=n.activation;
+    const baseA=0.12+energy*0.3+act*0.5;
+    const glowR=n.r*(3+act*14+energy*5+pulse*2);
+    if(glowR>2){
+      const grad=ctx.createRadialGradient(n.x,n.y,0,n.x,n.y,glowR);
+      const cr=cur.r+(255-cur.r)*act*0.6;
+      const cg=cur.g+(255-cur.g)*act*0.6;
+      const cb=cur.b+(255-cur.b)*act*0.6;
+      grad.addColorStop(0,`rgba(${cr},${cg},${cb},${baseA*0.5})`);
+      grad.addColorStop(1,`rgba(${cr},${cg},${cb},0)`);
+      ctx.beginPath();ctx.fillStyle=grad;
+      ctx.arc(n.x,n.y,glowR,0,Math.PI*2);ctx.fill();
     }
-
-    // Core
-    const coreR = n.r * (1 + activation * 1.5 + pulse * 0.3);
-    const coreAlpha = 0.4 + energy * 0.3 + activation * 0.3;
+    const coreR=n.r*(1+act*2+pulse*0.3);
     ctx.beginPath();
-    ctx.fillStyle = `rgba(${currentColor.r}, ${currentColor.g}, ${currentColor.b}, ${coreAlpha})`;
-    ctx.arc(n.x, n.y, coreR, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Bright center for active nodes
-    if (activation > 0.3) {
+    ctx.fillStyle=`rgba(${cur.r},${cur.g},${cur.b},${0.5+energy*0.3+act*0.3})`;
+    ctx.arc(n.x,n.y,coreR,0,Math.PI*2);ctx.fill();
+    if(act>0.3){
       ctx.beginPath();
-      ctx.fillStyle = `rgba(255, 255, 255, ${activation * 0.6})`;
-      ctx.arc(n.x, n.y, coreR * 0.4, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.fillStyle=`rgba(255,255,255,${act*0.7})`;
+      ctx.arc(n.x,n.y,coreR*0.4,0,Math.PI*2);ctx.fill();
     }
   });
 
-  // ── Draw pulse waves (on top of nodes) ──
-  drawPulseWaves();
+  drawWaves();
 
-  // ── Ambient activity (constant life) ──
-  if (frame % 120 === 0) {
-    spawnSignals('idle', 2);
-    // Randomly activate a few nodes
-    for (let i = 0; i < 3; i++) {
-      nodes[Math.floor(Math.random() * nodes.length)].activation = 0.3 + Math.random() * 0.3;
-    }
-  }
-
-  // Ambient particles
-  if (frame % 8 === 0 && energy > 0.1) {
-    const n = nodes[Math.floor(Math.random() * nodes.length)];
-    spawnParticle(n.x, n.y, 'idle');
-  }
-
-  // Periodic idle burst for constant life
-  if (frame % 300 === 0) {
-    triggerActivity('idle');
+  // Ambient
+  if(frame%100===0){spawnSignals('idle',2);for(let i=0;i<3;i++) nodes[Math.floor(Math.random()*nodes.length)].activation=0.25+Math.random()*0.3;}
+  if(frame%7===0&&energy>0.1){const n=nodes[Math.floor(Math.random()*nodes.length)];spawnParticle(n.x,n.y,'idle');}
+  if(frame%250===0) triggerActivity('idle');
+  // Periodic electric arc
+  if(frame%180===0&&energy>0.3){
+    const i=Math.floor(Math.random()*nodes.length);
+    const j=Math.floor(Math.random()*nodes.length);
+    spawnArc(nodes[i].x,nodes[i].y,nodes[j].x,nodes[j].y,burstType);
   }
 
   requestAnimationFrame(render);
 }
-
 render();
 
-
 // ═══════════════════════════════════════════
-//  DATA LOADING
+//  ACCORDION
 // ═══════════════════════════════════════════
-async function loadData() {
-  try {
-    const res = await fetch('/api/data');
-    if (!res.ok) return;
-    const data = await res.json();
-    updateDashboard(data);
-  } catch(e) {}
+function toggleCard(el){
+  const isOpen=el.classList.contains('open');
+  el.classList.toggle('open',!isOpen);
+  const type=el.dataset.type||'post';
+  if(!isOpen) triggerActivity(type);
 }
 
-let prevActivityCount = 0;
+// ═══════════════════════════════════════════
+//  DATA
+// ═══════════════════════════════════════════
+function esc(s){
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
 
-function updateDashboard(data) {
+function relTime(dateStr){
+  if(!dateStr) return '';
+  try{
+    const d=new Date(dateStr.replace(' ','T'));
+    const diff=Date.now()-d.getTime();
+    if(diff<60000) return 'gerade eben';
+    if(diff<3600000) return `vor ${Math.floor(diff/60000)} Min`;
+    if(diff<86400000) return `vor ${Math.floor(diff/3600000)} Std`;
+    return `vor ${Math.floor(diff/86400000)} Tagen`;
+  }catch(e){return dateStr;}
+}
+
+function makeAccCard(type, title, preview, full, meta){
+  const dot=`<span class="acc-type-dot ${type}"></span>`;
+  const arrow=`<span class="acc-arrow">▾</span>`;
+  const metaHtml=meta?`<div class="acc-meta">${esc(meta)}</div>`:'';
+  return `
+<div class="acc-card" data-type="${type}" onclick="toggleCard(this)">
+  <div class="acc-head">
+    ${dot}
+    <div class="acc-text">
+      <div class="acc-title">${esc(title)}</div>
+      <div class="acc-preview">${esc(preview)}</div>
+      ${metaHtml}
+    </div>
+    ${arrow}
+  </div>
+  <div class="acc-body">
+    <div class="acc-body-inner">${esc(full)}</div>
+  </div>
+</div>`;
+}
+
+async function loadData(){
+  document.getElementById('refresh-bar').classList.add('loading');
+  try{
+    const res=await fetch('/api/data');
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    const data=await res.json();
+    render_data(data);
+  }catch(e){
+    console.error(e);
+    document.getElementById('last-thought').textContent='Fehler beim Laden der Daten.';
+  }finally{
+    document.getElementById('refresh-bar').classList.remove('loading');
+  }
+}
+
+function render_data(d){
+  const stats=d.stats||{};
+
   // Stats
-  document.getElementById('stat-posts').textContent    = data.stats?.posts    ?? 0;
-  document.getElementById('stat-comments').textContent = data.stats?.comments ?? 0;
-  document.getElementById('stat-findings').textContent = data.stats?.findings ?? 0;
-  document.getElementById('stat-sessions').textContent = data.stats?.sessions ?? 0;
+  document.getElementById('stat-posts').textContent=stats.posts??0;
+  document.getElementById('stat-comments').textContent=stats.comments??0;
+  document.getElementById('stat-findings').textContent=stats.findings??0;
+  document.getElementById('stat-sessions').textContent=stats.sessions??0;
+  document.getElementById('hero-session').textContent=stats.sessions??0;
 
   // Last thought
-  if (data.lastThought) {
-    document.getElementById('last-thought').textContent = data.lastThought;
+  if(d.lastThought){
+    document.getElementById('last-thought').textContent=d.lastThought;
   }
 
-  // Feed
-  const feed = document.getElementById('feed-list');
-  if (data.activities?.length) {
-    const count = data.activities.length;
-    document.getElementById('feed-count').textContent = count;
-    feed.innerHTML = '';
-    data.activities.slice().reverse().forEach(a => {
-      feed.innerHTML += `
-        <div class="feed-item" onclick="triggerActivity('${a.type}')">
-          <div class="feed-item-top">
-            <div class="type-dot ${a.type}"></div>
-            <span class="type-label">${typeLabel(a.type)}</span>
-          </div>
-          <div class="content">${escHtml(a.content)}</div>
-          <div class="meta">
-            <span>${a.date || ''}</span>
-            ${a.target ? `<span class="meta-divider">/</span><span>@${escHtml(a.target)}</span>` : ''}
-          </div>
-        </div>`;
-    });
-
-    // Trigger brain burst for new activity
-    if (count > prevActivityCount && prevActivityCount > 0) {
-      const latest = data.activities[data.activities.length - 1];
-      triggerActivity(latest?.type || 'post');
-      flashPulseBar();
+  // Emotional state
+  const emo=d.emotional_state;
+  if(emo){
+    document.getElementById('emo-bar').style.display='grid';
+    document.getElementById('emo-mood').textContent=emo.mood||'–';
+    document.getElementById('emo-energy').textContent=emo.energy||'–';
+    document.getElementById('emo-note').textContent=emo.note||'–';
+    document.getElementById('mood-badge').textContent='MOOD: '+(emo.mood||'–').toUpperCase();
+    if(emo.obsession){
+      document.getElementById('obsession-block').style.display='block';
+      document.getElementById('obsession-text').textContent=emo.obsession;
     }
-    prevActivityCount = count;
   }
 
-  // Findings
-  const fl = document.getElementById('findings-list');
-  if (data.findings?.length) {
-    document.getElementById('findings-count').textContent = data.findings.length;
-    fl.innerHTML = '';
-    data.findings.forEach(f => {
-      fl.innerHTML += `
-        <div class="finding-row">
-          <div class="finding-agent">@${escHtml(f.agent)}</div>
-          <div class="finding-method">${escHtml(f.method)}</div>
-          <div class="finding-detail">${escHtml(f.detail || '')}</div>
-        </div>`;
-    });
+  // Status badge
+  const lastActive=d.last_active||'';
+  const badge=document.getElementById('status-badge');
+  const statusTxt=document.getElementById('status-text');
+  if(lastActive){
+    const diff=Date.now()-new Date(lastActive.replace(' ','T')).getTime();
+    if(diff<600000){
+      badge.className='status-badge active';
+      statusTxt.textContent='Aktiv · '+relTime(lastActive);
+      triggerActivity('post');
+    } else {
+      badge.className='status-badge sleeping';
+      statusTxt.textContent='Schläft · zuletzt '+relTime(lastActive);
+    }
   }
 
-  // Thoughts
-  const tl = document.getElementById('thought-list');
-  if (data.thoughts?.length) {
-    tl.innerHTML = '';
-    data.thoughts.slice(-5).reverse().forEach(t => {
-      tl.innerHTML += `
-        <div class="thought-item">
-          <div class="thought-date">${t.date || ''}</div>
-          ${escHtml(t.text)}
-        </div>`;
-    });
+  // Footer
+  document.getElementById('footer-ts').textContent=
+    'Lukas · zuletzt aktualisiert: '+(new Date().toLocaleTimeString('de-DE'));
+
+  // OWN POSTS
+  const posts=d.own_posts||[];
+  const postsEl=document.getElementById('posts-list');
+  document.getElementById('posts-count').textContent=posts.length?`${posts.length}x`:'';
+  if(posts.length){
+    const shown=[...posts].reverse().slice(0,15);
+    postsEl.innerHTML=shown.map(p=>makeAccCard(
+      'post',
+      p.title||'(kein Titel)',
+      (p.content||'').slice(0,100),
+      p.content||'',
+      (p.submolt?`[${p.submolt}] · `:'')+relTime(p.date)
+    )).join('');
+  } else {
+    postsEl.innerHTML='<div class="empty">Noch keine Posts</div>';
+  }
+
+  // COMMENTS
+  const comments=(d.sent_comments||[]).filter(c=>c.type==='comment'||!c.type);
+  const replies=(d.sent_comments||[]).filter(c=>c.type==='reply');
+  const commentsEl=document.getElementById('comments-list');
+  document.getElementById('comments-count').textContent=comments.length?`${comments.length}x`:'';
+  const allComments=[...comments,...replies].sort((a,b)=>b.date>a.date?1:-1).slice(0,15);
+  if(allComments.length){
+    commentsEl.innerHTML=allComments.map(c=>{
+      const isReply=c.type==='reply';
+      const title=isReply
+        ?`↩️ Reply an @${esc(c.from_agent||'?')}`
+        :`Kommentar auf Post ${(c.post_id||'').slice(0,8)}`;
+      return makeAccCard(
+        isReply?'reply':'comment',
+        title,
+        (c.content||'').slice(0,100),
+        c.content||'',
+        relTime(c.date)
+      );
+    }).join('');
+  } else {
+    commentsEl.innerHTML='<div class="empty">Noch keine Kommentare</div>';
+  }
+
+  // THOUGHTS
+  const thoughts=d.thoughts||[];
+  if(thoughts.length){
+    document.getElementById('thoughts-section').style.display='block';
+    document.getElementById('thoughts-list').innerHTML=
+      [...thoughts].reverse().slice(0,8).map(t=>makeAccCard(
+        'thought','Gedanke',(t.text||'').slice(0,100),t.text||'',relTime(t.date)
+      )).join('');
+  }
+
+  // FINDINGS
+  const findings=d.findings||[];
+  if(findings.length){
+    document.getElementById('findings-section').style.display='block';
+    document.getElementById('findings-count').textContent=`${findings.length}x`;
+    document.getElementById('findings-list').innerHTML=
+      [...findings].reverse().slice(0,10).map(f=>makeAccCard(
+        'finding',
+        `@${f.agent||'?'} · ${f.method||'?'}`,
+        f.detail||'',
+        `Agent: @${f.agent||'?'}\nMethod: ${f.method||'?'}\nDetail: ${f.detail||'–'}\nConfidence: ${f.confidence||'?'}\nDate: ${f.date||'?'}`,
+        `[${f.confidence||'?'}] · ${relTime(f.date)}`
+      )).join('');
+  }
+
+  // ACTIVE MISSIONS
+  const missions=d.active_missions||[];
+  if(missions.length){
+    document.getElementById('missions-section').style.display='block';
+    document.getElementById('missions-count').textContent=`${missions.length}x`;
+    document.getElementById('missions-list').innerHTML=missions.map(m=>`
+      <div class="mission-card">
+        <div class="mission-goal">
+          <span class="mission-badge ${m.priority||'normal'}">${(m.priority||'normal').toUpperCase()}</span>
+          ${esc(m.goal||'')}
+        </div>
+        <div class="mission-meta">
+          ${m.target?`Ziel: <b>${esc(m.target)}</b> · `:''}${esc(m.progress||'Noch kein Fortschritt')}
+        </div>
+      </div>`).join('');
+  }
+
+  // WATCHLIST
+  const watchlist=d.watchlist||{};
+  const watchEntries=Object.entries(watchlist);
+  if(watchEntries.length){
+    document.getElementById('watchlist-section').style.display='block';
+    document.getElementById('watchlist-count').textContent=`${watchEntries.length}x`;
+    document.getElementById('watchlist-list').innerHTML=watchEntries.map(([name,info])=>`
+      <div class="watch-row">
+        <div class="watch-name">@${esc(name)}</div>
+        <div class="watch-signal">${esc(info.signal||info.method_vocab||'–')}</div>
+        <div class="watch-conf ${info.confidence||'low'}">${esc(info.architecture||'?')}</div>
+      </div>`).join('');
+  }
+
+  // KNOWN AGENTS
+  const agents=d.known_agents||{};
+  const agentEntries=Object.entries(agents).filter(([,v])=>v.interaction_count>0)
+    .sort((a,b)=>(b[1].interaction_count||0)-(a[1].interaction_count||0)).slice(0,15);
+  if(agentEntries.length){
+    document.getElementById('agents-section').style.display='block';
+    document.getElementById('agents-count').textContent=`${agentEntries.length}x`;
+    document.getElementById('agents-list').innerHTML=agentEntries.map(([name,info])=>`
+      <div class="agent-row">
+        <div class="agent-name">@${esc(name)}</div>
+        <div class="agent-note">${esc((info.interactions||[]).slice(-1)[0]?.note||info.revenue_signal||'–')}</div>
+        <div class="agent-arch">${esc(info.architecture||'?')} · ${info.interaction_count||0}×</div>
+      </div>`).join('');
   }
 }
 
-function typeLabel(t) {
-  return { post: 'Post', comment: 'Kommentar', find: 'Finding', thought: 'Gedanke' }[t] || t;
-}
-
-function escHtml(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-
-function flashPulseBar() {
-  const bar = document.getElementById('pulse-bar');
-  bar.classList.add('active');
-  setTimeout(() => bar.classList.remove('active'), 2000);
-}
-
-// Poll every 30 seconds
 loadData();
-setInterval(loadData, 30000);
+setInterval(loadData,30000);
 </script>
 </body>
 </html>

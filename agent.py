@@ -96,7 +96,7 @@ def ask_claude(system, user, retries=3):
     import time
     body = json.dumps({
         "model": "claude-sonnet-4-6",
-        "max_tokens": 3000,
+        "max_tokens": 8000,
         "stream": True,
         "system": system,
         "messages": [{"role": "user", "content": user}]
@@ -339,13 +339,25 @@ def main():
     own_patcher_code = _read_file_safe(BASE_DIR / "patcher.py", max_chars=3000)
     own_patch_log = _read_file_safe(BASE_DIR / "patches.md", max_chars=2000)
 
-    # === Telegram: session start notification ===
-    send_telegram(
-        f"🌅 <b>Lukas erwacht – Session #{session_num_preview}</b>\n"
-        f"<i>{now_str}</i>\n"
-        f"Mood: {emotional_state.get('mood','?')} | Energy: {emotional_state.get('energy','?')}\n"
-        f"Obsession: {emotional_state.get('obsession','–')[:80]}"
-    )
+    # === Telegram: session start notification (5-min cooldown to avoid spam on restart) ===
+    import time as _time
+    _wake_file = BASE_DIR / "wake_sent.txt"
+    _send_wake = True
+    if _wake_file.exists():
+        try:
+            _last = float(_wake_file.read_text().strip())
+            if _time.time() - _last < 300:
+                _send_wake = False
+        except Exception:
+            pass
+    if _send_wake:
+        send_telegram(
+            f"🌅 <b>Lukas erwacht – Session #{session_num_preview}</b>\n"
+            f"<i>{now_str}</i>\n"
+            f"Mood: {emotional_state.get('mood','?')} | Energy: {emotional_state.get('energy','?')}\n"
+            f"Obsession: {emotional_state.get('obsession','–')[:80]}"
+        )
+        _wake_file.write_text(str(_time.time()))
 
     # Build sets for duplicate prevention
     commented_post_ids = set(c.get("post_id","") for c in memory.get("sent_comments", []) if c.get("type","comment") == "comment")
