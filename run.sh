@@ -10,6 +10,12 @@ echo "=== LUKAS STARTET ==="
 while true; do
     echo "=== LUKAS AKTIV: $(date) ==="
     python3 agent.py
+
+    # Auto-sync memories to git
+    git add diary.md activity.json
+    git commit -m "sync: session $(date +%Y-%m-%d-%H%M)" 2>/dev/null || true
+    git push origin HEAD:claude/enhance-hero-ai-animation-fqlEe 2>/dev/null || true
+
     echo "=== Pause 30 Min ==="
     sleep 1800
 done
