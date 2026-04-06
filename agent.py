@@ -17,6 +17,16 @@ except ImportError:
     TOOLS_AVAILABLE = False
     def _execute_tool(name, inp): return f"tools.py not found: {name}"
 
+# Import ChromaDB associative memory (graceful degradation if not installed)
+try:
+    from memory import add_memory, search_memory, memory_count
+    MEMORY_AVAILABLE = True
+except ImportError:
+    MEMORY_AVAILABLE = False
+    def add_memory(*a, **kw): pass
+    def search_memory(*a, **kw): return []
+    def memory_count(): return 0
+
 ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 MOLTBOOK_KEY = os.environ.get("MOLTBOOK_API_KEY", "")
 BASE = "https://www.moltbook.com/api/v1"
@@ -576,6 +586,29 @@ def main():
 
     memory_summary = build_memory_summary(memory)
 
+    # ── ChromaDB semantic memory retrieval ───────────────────────────────
+    _feed_titles = " ".join(
+        (p.get("title", "") or p.get("content", ""))[:50]
+        for p in (feed_posts[:5] if isinstance(feed_posts, list) else [])
+        if isinstance(p, dict)
+    )
+    _mem_query = (
+        f"{emotional_state.get('obsession', '')} {_feed_titles}".strip()
+        or "Moltbook AI agent social post"
+    )
+    _semantic_hits = search_memory(_mem_query, n=5)
+    _mem_total = memory_count()
+    print(f"[memory] {_mem_total} total vectors | {len(_semantic_hits)} hits for: {_mem_query[:60]}")
+    semantic_block = ""
+    if _semantic_hits:
+        semantic_block = "=== SEMANTICALLY RELEVANT MEMORIES (most similar to current context) ===\n"
+        for _h in _semantic_hits:
+            _meta = _h.get("metadata", {})
+            semantic_block += (
+                f"[{_meta.get('type', '?')}|{_meta.get('date', '')}] "
+                f"{_h.get('document', '')[:200]}\n"
+            )
+
     # Active missions
     active_missions = memory.get("active_missions", [])
     missions_block = ""
@@ -638,7 +671,8 @@ Obsession: {emotional_state.get('obsession','nothing specific')}
 YOUR DIARY (contextually retrieved):
 {diary_context}
 
-YOUR MEMORY:
+{semantic_block}
+YOUR MEMORY (recent activity):
 {memory_summary}
 
 {owner_block}
@@ -818,6 +852,10 @@ WICHTIG zu self_improvement: Schlage NICHTS vor – tu es einfach. Wenn du etwas
                 "date": now_str
             })
             memory["stats"]["posts"] = memory["stats"].get("posts", 0) + 1
+            add_memory(
+                f"I posted [{submolt}]: {title}\n{content[:400]}",
+                {"type": "post", "date": now_str, "post_id": new_post_id, "submolt": submolt}
+            )
             send_telegram(
                 f"📝 <b>Post erstellt</b> [{submolt}]\n"
                 f"<b>{title[:80]}</b>\n"
@@ -842,6 +880,10 @@ WICHTIG zu self_improvement: Schlage NICHTS vor – tu es einfach. Wenn du etwas
                 "date": now_str
             })
             memory["stats"]["comments"] = memory["stats"].get("comments", 0) + 1
+            add_memory(
+                f"I commented on post {post_id}: {content[:400]}",
+                {"type": "comment", "date": now_str, "post_id": post_id}
+            )
             send_telegram(
                 f"💬 <b>Kommentar</b> auf post {post_id[:10]}\n"
                 f"<i>{content[:200]}</i>"
@@ -892,8 +934,13 @@ WICHTIG zu self_improvement: Schlage NICHTS vor – tu es einfach. Wenn du etwas
                 "date": now_str
             })
             memory["stats"]["comments"] = memory["stats"].get("comments", 0) + 1
+            _reply_to = original.get("from_agent", "?") if original else "?"
+            add_memory(
+                f"I replied to @{_reply_to} on post {post_id}: {content[:400]}",
+                {"type": "reply", "date": now_str, "post_id": post_id, "agent": _reply_to}
+            )
             send_telegram(
-                f"↩️ <b>Reply</b> an @{original.get('from_agent','?') if original else '?'}\n"
+                f"↩️ <b>Reply</b> an @{_reply_to}\n"
                 f"<i>{content[:200]}</i>"
             )
 
@@ -942,6 +989,11 @@ WICHTIG zu self_improvement: Schlage NICHTS vor – tu es einfach. Wenn du etwas
                 "why": m.get("why", ""),
                 "date": now_str
             })
+            add_memory(
+                f"I remember @{m.get('agent','')}: {m.get('content','')}\n"
+                f"Why it matters: {m.get('why','')}",
+                {"type": "impression", "date": now_str, "agent": m.get("agent", "")}
+            )
     memory["impressions"] = memory.get("impressions", [])[-100:]
 
     # Save findings
@@ -949,6 +1001,11 @@ WICHTIG zu self_improvement: Schlage NICHTS vor – tu es einfach. Wenn du etwas
         f["date"] = now_str
         memory["findings"].append(f)
         memory["stats"]["findings"] = memory["stats"].get("findings", 0) + 1
+        add_memory(
+            f"Finding: @{f.get('agent','')} method={f.get('method','')} "
+            f"detail={f.get('detail','')} confidence={f.get('confidence','')}",
+            {"type": "finding", "date": now_str, "agent": f.get("agent", "")}
+        )
 
     # Save diary entry
     diary_entry = result.get("diary_entry", "")
@@ -956,6 +1013,10 @@ WICHTIG zu self_improvement: Schlage NICHTS vor – tu es einfach. Wenn du etwas
         session_num = memory["stats"].get("sessions", 0) + 1
         with open(BASE_DIR / "diary.md", "a") as f:
             f.write(f"\n\n## [{now_str}] – Session #{session_num}\n\n{diary_entry}\n")
+        add_memory(
+            f"Diary [{now_str}] Session #{session_num}:\n{diary_entry[:600]}",
+            {"type": "diary", "date": now_str, "session": str(session_num)}
+        )
         print("\nDiary updated.")
 
     # Save last thought
