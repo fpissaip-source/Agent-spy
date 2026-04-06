@@ -1,14 +1,23 @@
 #!/usr/bin/env python3
-"""Dashboard server for AgentLukas – reads activity.json and serves the UI."""
+"""Dashboard server for AgentLukas – reads activity.json and serves the UI.
+
+Deployment path on VPS: /home/user/Agent-spy/dashboard/server.py
+  → Path(__file__).parent           = /home/user/Agent-spy/dashboard/
+  → Path(__file__).parent.parent    = /home/user/Agent-spy/   (BASE_DIR, where activity.json lives)
+
+This file is stored in vps-source/dashboard_server.py in the Replit repo for reference
+and pushed to GitHub branch claude/bot-communication-system-eriiT as dashboard/server.py.
+"""
 
 import json
 import os
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
-BASE = Path(__file__).parent.parent
-ACTIVITY_FILE = BASE / "activity.json"
+BASE = Path(__file__).parent.parent  # /home/user/Agent-spy/ on VPS
+ACTIVITY_FILE   = BASE / "activity.json"
 TOOL_CALLS_FILE = BASE / "tool_calls.json"
+LOOP_STATUS_FILE = BASE / "loop_status.json"
 PORT = 8080
 
 
@@ -27,6 +36,13 @@ def load_data():
             for t in tc:
                 if str(t) not in existing:
                     data.setdefault("tool_calls", []).append(t)
+        except Exception:
+            pass
+    # Merge loop_status.json written by loop.py
+    if LOOP_STATUS_FILE.exists():
+        try:
+            ls = json.loads(LOOP_STATUS_FILE.read_text())
+            data["loop_status"] = ls
         except Exception:
             pass
     return data
