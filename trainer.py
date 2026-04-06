@@ -114,35 +114,38 @@ def merge_records(records: list[dict]) -> Path:
 
 # ── RunPod ────────────────────────────────────────────────────────────────────
 
-RUNPOD_SCRIPT = """#!/bin/bash
+# NOTE: Use __MODEL__ as placeholder (not {model}) to avoid .format() consuming
+# the Python dict-access braces like {m['role']} inside the script body.
+RUNPOD_SCRIPT = r"""#!/bin/bash
 set -e
-pip install -q unsloth[colab-new] transformers datasets
-python3 - <<'PY'
+pip install -q unsloth[colab-new] transformers datasets trl
+python3 << 'PY'
 from unsloth import FastLanguageModel
 from datasets import load_dataset
 from trl import SFTTrainer
 from transformers import TrainingArguments
-import torch, json, os
+import torch
 
-model, tokenizer = FastLanguageModel.from_pretrained(
-    model_name  = "{model}",
+model_obj, tokenizer = FastLanguageModel.from_pretrained(
+    model_name     = "__MODEL__",
     max_seq_length = 4096,
     load_in_4bit   = True,
 )
-model = FastLanguageModel.get_peft_model(
-    model, r=16, target_modules=["q_proj","k_proj","v_proj","o_proj","gate_proj","up_proj","down_proj"],
+model_obj = FastLanguageModel.get_peft_model(
+    model_obj, r=16,
+    target_modules=["q_proj","k_proj","v_proj","o_proj","gate_proj","up_proj","down_proj"],
     lora_alpha=16, lora_dropout=0, bias="none", use_gradient_checkpointing=True,
 )
-dataset = load_dataset("json", data_files="merged_train.jsonl", split="train")
+dataset = load_dataset("json", data_files="/workspace/merged_train.jsonl", split="train")
 
 def fmt(ex):
     msgs = ex.get("messages", [])
-    parts = [f"<|start_header_id|>{m['role']}<|end_header_id|>\\n{m['content']}<|eot_id|>" for m in msgs]
-    return {{"text": "<|begin_of_text|>" + "".join(parts)}}
+    parts = ["<|start_header_id|>" + m["role"] + "<|end_header_id|>\n" + m["content"] + "<|eot_id|>" for m in msgs]
+    return {"text": "<|begin_of_text|>" + "".join(parts)}
 
 dataset = dataset.map(fmt)
 trainer = SFTTrainer(
-    model=model,
+    model=model_obj,
     tokenizer=tokenizer,
     train_dataset=dataset,
     dataset_text_field="text",
@@ -155,14 +158,14 @@ trainer = SFTTrainer(
         fp16=not torch.cuda.is_bf16_supported(),
         bf16=torch.cuda.is_bf16_supported(),
         logging_steps=10,
-        output_dir="lukas_lora",
+        output_dir="/workspace/lukas_lora",
         save_strategy="epoch",
     ),
 )
 trainer.train()
-model.save_pretrained("lukas_lora_final")
-tokenizer.save_pretrained("lukas_lora_final")
-print("Training complete! Model saved to lukas_lora_final/")
+model_obj.save_pretrained("/workspace/lukas_lora_final")
+tokenizer.save_pretrained("/workspace/lukas_lora_final")
+print("Training complete! Model saved to /workspace/lukas_lora_final/")
 PY
 """
 
@@ -172,17 +175,26 @@ def launch_runpod(merged_path: Path) -> None:
         print("ERROR: RUNPOD_API_KEY not set.")
         sys.exit(1)
 
-    script = RUNPOD_SCRIPT.format(model=RUNPOD_MODEL).strip()
-
-    # Read merged data and embed as base64 in pod startup script
     import base64
+
+    # Replace __MODEL__ placeholder (safe: no format-brace collisions)
+    script = RUNPOD_SCRIPT.replace("__MODEL__", RUNPOD_MODEL).strip()
+
+    # Embed training data as base64 so no temp file copy needed on host side
     data_b64 = base64.b64encode(merged_path.read_bytes()).decode()
 
+    # Build startup script that first restores the data file, then trains
     full_script = (
-        f"echo '{data_b64}' | base64 -d > /workspace/merged_train.jsonl\n"
-        f"cd /workspace\n"
+        "#!/bin/bash\nset -e\n"
+        f"echo {data_b64} | base64 -d > /workspace/merged_train.jsonl\n"
+        "cd /workspace\n"
         + script
     )
+
+    # Base64-encode the ENTIRE startup script so we don't hit shell quoting issues
+    # in dockerArgs (no single-quotes inside dockerArgs string)
+    full_script_b64 = base64.b64encode(full_script.encode()).decode()
+    docker_args = f"bash -c 'echo {full_script_b64} | base64 -d | bash'"
 
     payload = json.dumps({
         "query": """
@@ -206,7 +218,7 @@ def launch_runpod(merged_path: Path) -> None:
                 "gpuCount":      1,
                 "volumeInGb":    20,
                 "containerDiskInGb": 20,
-                "dockerArgs":    f"bash -c '{full_script}'",
+                "dockerArgs":    docker_args,
             }
         }
     }).encode()
