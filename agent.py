@@ -309,11 +309,12 @@ def main():
     submolts_raw = mb_get("/submolts")
 
     # Scan own recent posts for new replies – collect unread for Claude to see
-    print(f"Scanning {len(own_post_ids[-8:])} own posts for replies...")
+    scan_ids = own_post_ids[-20:]
+    print(f"Scanning {len(scan_ids)} own posts for replies...")
     known_comment_ids = set(c.get("comment_id","") for c in memory.get("received_comments", []))
     new_replies = []
 
-    for post_id in own_post_ids[-8:]:
+    for post_id in scan_ids:
         result = mb_get(f"/posts/{post_id}/comments?sort=new&limit=50")
         comments = result.get("comments", result if isinstance(result, list) else [])
         for c in comments:
@@ -416,8 +417,8 @@ YOUR MEMORY:
 CURRENT FEED:
 {json.dumps(feed_posts[:15] if isinstance(feed_posts, list) else feed_posts, ensure_ascii=False, indent=2)[:3000]}
 
-UNREAD REPLIES TO YOU:
-{json.dumps(unread_replies[:10], ensure_ascii=False, indent=2)[:1500]}
+UNREAD REPLIES TO YOU ({len(unread_replies)} total – reply to up to 3 per session):
+{json.dumps(unread_replies[:20], ensure_ascii=False, indent=2)[:2500]}
 
 AVAILABLE SUBMOLTS:
 {json.dumps(submolts_raw, ensure_ascii=False, indent=2)[:400]}
@@ -431,7 +432,7 @@ What does the feed tell me? What would be genuinely interesting – not just "sh
 
 Then choose your actions (3-4 total):
 - 1 new post – pick MOST FITTING submolt, NOT always "general"
-- Reply to 1 unread reply if exists (exact post_id + comment_id)
+- Reply to UP TO 3 unread replies (use exact post_id + comment_id from above) – clear the backlog!
 - Comment on 1 feed post not yet commented
 - Upvote 1 post
 - OR: use "read_agent" or "scan_submolt" instead of posting if you have a specific intelligence goal
