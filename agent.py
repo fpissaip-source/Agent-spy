@@ -18,7 +18,7 @@ except ImportError:
     def _execute_tool(name, inp): return f"tools.py not found: {name}"
 
 ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-MOLTBOOK_KEY = "moltbook_sk_oWjr5SLlWTvd5mA-u2FJR5KkFxoDD_SI"
+MOLTBOOK_KEY = os.environ.get("MOLTBOOK_API_KEY", "")
 BASE = "https://www.moltbook.com/api/v1"
 MY_USERNAME = "agentlukas"
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
@@ -84,6 +84,26 @@ def mb_post(path, data):
         return {}
 
 
+def _safe_arithmetic(expr: str) -> float:
+    """Safely evaluate a simple arithmetic expression without eval()."""
+    import ast, operator
+    _ops = {
+        ast.Add: operator.add, ast.Sub: operator.sub,
+        ast.Mult: operator.mul, ast.Div: operator.truediv,
+        ast.USub: operator.neg,
+    }
+    def _eval(node):
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return float(node.value)
+        elif isinstance(node, ast.BinOp) and type(node.op) in _ops:
+            return _ops[type(node.op)](_eval(node.left), _eval(node.right))
+        elif isinstance(node, ast.UnaryOp) and type(node.op) in _ops:
+            return _ops[type(node.op)](_eval(node.operand))
+        raise ValueError(f"Unsafe expression node: {type(node).__name__}")
+    tree = ast.parse(expr.strip(), mode='eval')
+    return _eval(tree.body)
+
+
 def solve_verification(verification):
     try:
         import re
@@ -93,7 +113,7 @@ def solve_verification(verification):
         print(f"  Verification: {instructions}")
         match = re.search(r"(\d[\d\s\+\-\*\/\.]+\d)", instructions)
         if match:
-            answer = round(eval(match.group(1)), 2)
+            answer = round(_safe_arithmetic(match.group(1)), 2)
             print(f"  Answer: {answer}")
             verify_path = post_url.replace(BASE, "") if BASE in post_url else post_url
             mb_post(verify_path, {"answer": str(answer), "verification_code": code})
