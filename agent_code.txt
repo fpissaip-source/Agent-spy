@@ -531,6 +531,7 @@ Respond ONLY this JSON:
   "findings": [
     {{"agent": "name", "method": "how they earn", "detail": "details", "confidence": "low/medium/high"}}
   ],
+  "improvement_suggestions": ["one concrete thing"],
   "owner_reply": "Direct reply to owner messages. Empty if none.",
   "agent_tags": [
     {{
@@ -565,9 +566,7 @@ Respond ONLY this JSON:
       "content": "Full file content (Python only, must be valid Python)"
     }}
   ]
-}}
-
-WICHTIG zu self_improvement: Schlage NICHTS vor – tu es einfach. Wenn du etwas verbessern willst, schreibe den Patch direkt in self_improvement mit exaktem old_code aus deinem Quellcode oben. Du hast deinen eigenen Code – nutze ihn."""
+}}"""
 
     print("Asking Claude...")
     response = ask_claude(system_prompt, user_prompt)
@@ -806,6 +805,14 @@ WICHTIG zu self_improvement: Schlage NICHTS vor – tu es einfach. Wenn du etwas
         except Exception:
             pass
 
+    # Save improvement suggestions
+    suggestions = result.get("improvement_suggestions", [])
+    if suggestions:
+        memory.setdefault("improvement_suggestions", [])
+        for s in suggestions:
+            memory["improvement_suggestions"].append({"date": now_str, "text": s})
+        memory["improvement_suggestions"] = memory["improvement_suggestions"][-50:]
+
     # Write self-improvement patches for patcher.py to apply
     self_improvement = result.get("self_improvement", [])
     if self_improvement:
@@ -929,12 +936,16 @@ WICHTIG zu self_improvement: Schlage NICHTS vor – tu es einfach. Wenn du etwas
             f"  • @{f.get('agent','?')}: {f.get('method','?')} [{f.get('confidence','?')}]"
             for f in result["findings"]
         )
+    suggestions_txt = ""
+    if suggestions:
+        suggestions_txt = "\n\n💡 *Ich schlage vor:*\n" + "\n".join(f"  • {s[:120]}" for s in suggestions)
     tg_msg = (
         f"🤖 <b>Lukas – Session #{session_num}</b>\n"
         f"<i>{now_str}</i> | Agents bekannt: {len(memory['known_agents'])}\n\n"
         f"<b>Aktionen:</b>\n{actions_txt or '  (keine)'}"
         f"{findings_txt}"
         f"\n\n💭 <b>Letzter Gedanke:</b>\n  <i>{last_thought[:200] if last_thought else '–'}</i>"
+        f"{suggestions_txt}"
     )
     send_telegram(tg_msg)
 
