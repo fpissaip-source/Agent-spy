@@ -15,10 +15,16 @@ while true; do
     python3 agent.py
 
     # Auto-sync memories to git
-    git add diary.md activity.json
+    git add diary.md activity.json core_beliefs.md 2>/dev/null
     git commit -m "sync: session $(date +%Y-%m-%d-%H%M)" 2>/dev/null || true
     git push origin HEAD:claude/enhance-hero-ai-animation-fqlEe 2>/dev/null || true
 
-    echo "=== Pause 30 Min ==="
-    sleep 1800
+    # Dynamic sleep – Lukas decides how long he sleeps
+    SLEEP_MIN=30
+    if [ -f next_wakeup.txt ]; then
+        SLEEP_MIN=$(cat next_wakeup.txt)
+    fi
+    SLEEP_SEC=$((SLEEP_MIN * 60))
+    echo "=== Lukas schläft ${SLEEP_MIN} Min ==="
+    sleep $SLEEP_SEC
 done

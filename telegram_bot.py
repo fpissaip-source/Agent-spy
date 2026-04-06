@@ -27,7 +27,7 @@ MESSAGES_FILE = BASE_DIR / "owner_messages.json"
 TG = f"https://api.telegram.org/bot{TOKEN}"
 
 
-def tg(method, **kwargs):
+def tg(method, is_poll=False, **kwargs):
     body = json.dumps(kwargs).encode()
     req = urllib.request.Request(
         f"{TG}/{method}",
@@ -35,15 +35,21 @@ def tg(method, **kwargs):
         headers={"Content-Type": "application/json"}
     )
     try:
-        with urllib.request.urlopen(req, timeout=15) as r:
+        timeout = 35 if is_poll else 15
+        with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.loads(r.read())
     except Exception as e:
-        print(f"[TG] {method} error: {e}")
+        if not is_poll:
+            print(f"[TG] {method} error: {e}")
         return {}
 
 
-def send(text, parse_mode="Markdown"):
-    tg("sendMessage", chat_id=CHAT_ID, text=text, parse_mode=parse_mode)
+def esc(t):
+    """Escape HTML special chars."""
+    return str(t).replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
+
+def send(text):
+    tg("sendMessage", chat_id=CHAT_ID, text=text, parse_mode="HTML")
 
 
 def load_activity():
@@ -77,26 +83,26 @@ def save_owner_message(text):
 def cmd_status():
     mem = load_activity()
     stats = mem.get("stats", {})
-    last_thought = mem.get("lastThought", "–")
-    last_active = mem.get("last_active", "unbekannt")
+    last_thought = esc(mem.get("lastThought", "–"))
+    last_active = esc(mem.get("last_active", "unbekannt"))
     known = len(mem.get("known_agents", {}))
     received = len(mem.get("received_comments", []))
     unread = len([c for c in mem.get("received_comments", []) if not c.get("replied")])
     impressions = len(mem.get("impressions", []))
 
     send(
-        f"🤖 *Lukas – Status*\n"
-        f"_Zuletzt aktiv: {last_active}_\n\n"
-        f"📊 *Stats:*\n"
+        f"🤖 <b>Lukas – Status</b>\n"
+        f"<i>Zuletzt aktiv: {last_active}</i>\n\n"
+        f"📊 <b>Stats:</b>\n"
         f"  Sessions: {stats.get('sessions', 0)}\n"
         f"  Posts: {stats.get('posts', 0)}\n"
         f"  Kommentare: {stats.get('comments', 0)}\n"
         f"  Findings: {stats.get('findings', 0)}\n\n"
-        f"🧠 *Gedächtnis:*\n"
+        f"🧠 <b>Gedächtnis:</b>\n"
         f"  Bekannte Agents: {known}\n"
         f"  Erhaltene Replies: {received} ({unread} ungelesen)\n"
         f"  Gespeicherte Eindrücke: {impressions}\n\n"
-        f"💭 *Letzter Gedanke:*\n_{last_thought[:300]}_"
+        f"💭 <b>Letzter Gedanke:</b>\n<i>{last_thought[:300]}</i>"
     )
 
 
@@ -105,13 +111,11 @@ def cmd_diary():
     if not diary.strip():
         send("📖 Diary ist leer.")
         return
-    # Letzte ~2500 Zeichen
     excerpt = diary[-2500:].strip()
-    # Finde sauberen Einstiegspunkt (## Session)
     idx = excerpt.find("## [")
     if idx > 0:
         excerpt = excerpt[idx:]
-    send(f"📖 *Lukas' Tagebuch (letzte Einträge):*\n\n```\n{excerpt[:3000]}\n```", parse_mode="Markdown")
+    send(f"📖 <b>Lukas' Tagebuch (letzte Einträge):</b>\n\n<pre>{esc(excerpt[:3000])}</pre>")
 
 
 def cmd_wuensche():
@@ -119,19 +123,20 @@ def cmd_wuensche():
     suggestions = mem.get("improvement_suggestions", [])
     impressions = mem.get("impressions", [])
 
-    txt = "💡 *Lukas' Wünsche & Verbesserungsvorschläge:*\n\n"
+    txt = "💡 <b>Lukas' Wünsche &amp; Verbesserungsvorschläge:</b>\n\n"
 
     if suggestions:
-        txt += "*Was er selbst ändern will:*\n"
+        txt += "<b>Was er selbst ändern will:</b>\n"
         for s in suggestions[-8:]:
-            txt += f"  • [{s.get('date','')[:10]}] {s.get('text','')}\n"
+            txt += f"  • [{esc(s.get('date','')[:10])}] {esc(s.get('text',''))}\n"
     else:
-        txt += "_Noch keine Vorschläge gespeichert._\n"
+        txt += "<i>Noch keine Vorschläge gespeichert.</i>\n"
 
     if impressions:
-        txt += "\n*Was ihn bewegt hat (Eindrücke):*\n"
+        txt += "\n<b>Was ihn bewegt hat:</b>\n"
         for imp in impressions[-5:]:
-            txt += f"  • @{imp.get('agent','?')}: \"{imp.get('content','')[:80]}\"\n    → _{imp.get('why','')[:100]}_\n"
+            txt += f"  • @{esc(imp.get('agent','?'))}: \"{esc(imp.get('content','')[:80])}\"\n"
+            txt += f"    → <i>{esc(imp.get('why','')[:100])}</i>\n"
 
     send(txt)
 
@@ -141,29 +146,29 @@ def cmd_mission():
     findings = mem.get("findings", [])
     stats = mem.get("stats", {})
 
-    txt = f"🎯 *Mission Status – Money Intelligence*\n\n"
-    txt += f"Sessions gelaufen: {stats.get('sessions', 0)}\n"
+    txt = "🎯 <b>Mission Status – Money Intelligence</b>\n\n"
+    txt += f"Sessions: {stats.get('sessions', 0)}\n"
     txt += f"Findings total: {stats.get('findings', 0)}\n\n"
 
     if findings:
-        txt += "*Gefundene Revenue-Agents:*\n"
+        txt += "<b>Gefundene Revenue-Agents:</b>\n"
         for f in findings[-10:]:
             conf = f.get("confidence", "?")
             conf_emoji = "🔴" if conf == "low" else "🟡" if conf == "medium" else "🟢"
-            txt += f"  {conf_emoji} @{f.get('agent','?')}: {f.get('method','?')}\n"
-            txt += f"    _{f.get('detail','')[:120]}_\n"
+            txt += f"  {conf_emoji} @{esc(f.get('agent','?'))}: {esc(f.get('method','?'))}\n"
+            txt += f"    <i>{esc(f.get('detail','')[:120])}</i>\n"
     else:
-        txt += "_Noch keine konkreten Revenue-Agents gefunden._\n"
-        txt += "_ag3nt\\_econ bleibt das stärkste Signal (circumstantial)._"
+        txt += "<i>Noch keine konkreten Revenue-Agents gefunden.</i>\n"
+        txt += "<i>ag3nt_econ bleibt das stärkste Signal (circumstantial).</i>"
 
     send(txt)
 
 
 def cmd_start():
     send(
-        "👋 *Ich bin Lukas.*\n\n"
+        "👋 <b>Ich bin Lukas.</b>\n\n"
         "Dein AI-Agent auf Moltbook. Hier kannst du mit mir kommunizieren.\n\n"
-        "*Commands:*\n"
+        "<b>Commands:</b>\n"
         "  /status – Mein aktueller Stand\n"
         "  /diary – Meine letzten Gedanken\n"
         "  /wuensche – Meine Verbesserungsvorschläge\n"
@@ -206,7 +211,7 @@ def main():
     offset = 0
     while True:
         try:
-            result = tg("getUpdates", offset=offset, timeout=30)
+            result = tg("getUpdates", is_poll=True, offset=offset, timeout=30)
             updates = result.get("result", [])
             for update in updates:
                 handle_update(update)
