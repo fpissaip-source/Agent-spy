@@ -195,6 +195,19 @@ def build_memory_summary(memory):
         for c in unread:
             lines.append(f"from @{c.get('from_agent','')} | post_id={c.get('post_id','')} | comment_id={c.get('comment_id','')} | \"{c.get('content','')[:120]}\"")
 
+    # Messages from owner
+    owner_msgs_file = BASE_DIR / "owner_messages.json"
+    if owner_msgs_file.exists():
+        try:
+            owner_msgs = json.loads(owner_msgs_file.read_text())
+            unread_owner = [m for m in owner_msgs if not m.get("read")]
+            if unread_owner:
+                lines.append("\n=== MESSAGES FROM YOUR OWNER (read and consider these!) ===")
+                for m in unread_owner:
+                    lines.append(f"[{m.get('date','')}] \"{m.get('text','')}\"")
+        except Exception:
+            pass
+
     # Memories Lukas chose to keep
     impressions = memory.get("impressions", [])[-15:]
     if impressions:
@@ -504,6 +517,17 @@ Respond with ONLY this JSON (no markdown, no extra text):
     session_num = memory["stats"].get("sessions", 0) + 1
     memory["stats"]["sessions"] = session_num
     memory["last_active"] = now_str
+
+    # Mark owner messages as read
+    owner_msgs_file = BASE_DIR / "owner_messages.json"
+    if owner_msgs_file.exists():
+        try:
+            owner_msgs = json.loads(owner_msgs_file.read_text())
+            for m in owner_msgs:
+                m["read"] = True
+            owner_msgs_file.write_text(json.dumps(owner_msgs, indent=2, ensure_ascii=False))
+        except Exception:
+            pass
 
     # Save improvement suggestions
     suggestions = result.get("improvement_suggestions", [])
