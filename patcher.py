@@ -41,6 +41,24 @@ def send_telegram(message):
         print(f"  [Patcher/Telegram] Error: {e}")
 
 
+def write_repair_needed(filename, description, old_code, new_code, error_type, error_msg):
+    """Write repair_needed.json so Lukas sees the failure on next wake and can fix it."""
+    repair = {
+        "file": filename,
+        "description": description,
+        "old_code": old_code,
+        "new_code": new_code,
+        "error_type": error_type,
+        "error_msg": error_msg,
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
+    }
+    repair_path = BASE_DIR / "repair_needed.json"
+    try:
+        repair_path.write_text(json.dumps(repair, indent=2, ensure_ascii=False))
+    except Exception as e:
+        print(f"  [Patcher] Could not write repair_needed.json: {e}")
+
+
 def log_patch(filename, description, old_snippet, new_snippet, success, reason=""):
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     status = "✓ APPLIED" if success else f"✗ FAILED ({reason})"
@@ -86,6 +104,8 @@ def apply_patch(patch):
             f"Grund: old_code nicht gefunden\n"
             f"<i>{description[:120]}</i>"
         )
+        write_repair_needed(filename, description, old_code, new_code, "old_code_not_found",
+                            f"The exact old_code was not found in {filename}. It may have changed since you wrote the patch.")
         return False
 
     # Backup before patching
@@ -113,6 +133,7 @@ def apply_patch(patch):
                 f"Syntaxfehler: <code>{reason[:200]}</code>\n"
                 f"<i>{description[:120]}</i>"
             )
+            write_repair_needed(filename, description, old_code, new_code, "syntax_error", reason)
             return False
         backup.unlink(missing_ok=True)
 
