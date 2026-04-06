@@ -540,8 +540,11 @@ Respond ONLY this JSON:
     print(f"Claude response: {response[:300]}...")
 
     def _repair_json(s):
-        """Fix unescaped control chars inside JSON strings (char-by-char)."""
+        """Strip markdown fences + fix unescaped control chars in JSON strings."""
         import re
+        # Strip ```json ... ``` markdown code fences
+        s = re.sub(r'^```[a-z]*\s*', '', s.strip())
+        s = re.sub(r'\s*```$', '', s.strip())
         # Extract outermost JSON object
         try:
             s = s[s.index("{"):s.rindex("}")+1]
