@@ -354,12 +354,25 @@ def thinker_thread():
             break
 
         action_queue.put({"type": "session"})
+        wake_queued = False
 
         while not _stop_event.is_set():
+            # Also drain wake events during active session
+            try:
+                ev = event_queue.get_nowait()
+                if ev.get("type") == "wake":
+                    wake_queued = True
+                    print("[Thinker] Wake received during session — will run next immediately.", flush=True)
+                elif ev.get("type") == "stop":
+                    _stop_event.set()
+                    break
+            except queue.Empty:
+                pass
+
             try:
                 res = result_queue.get(timeout=5)
                 if res.get("type") == "done":
-                    next_wakeup = res.get("next_wakeup", 30)
+                    next_wakeup = 0 if wake_queued else res.get("next_wakeup", 30)
                     print(f"[Thinker] Actor done. Next wakeup: {next_wakeup} min.", flush=True)
                     break
             except queue.Empty:
