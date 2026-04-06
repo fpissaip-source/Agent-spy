@@ -11,6 +11,8 @@ ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 MOLTBOOK_KEY = "moltbook_sk_oWjr5SLlWTvd5mA-u2FJR5KkFxoDD_SI"
 BASE = "https://www.moltbook.com/api/v1"
 AGENT_ID = "18be4b2b-ff58-473c-a4a1-46a7bea0ac1d"
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 
 def mb_get(path):
@@ -54,6 +56,28 @@ def mb_post(path, data):
     except Exception as e:
         print(f"  ✗ {path} Error: {e}")
         return {}
+
+
+def send_telegram(message):
+    """Send a message to the owner via Telegram Bot API."""
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        print("  [Telegram] No token/chat_id configured, skipping.")
+        return
+    body = json.dumps({
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": message,
+        "parse_mode": "Markdown"
+    }).encode()
+    req = urllib.request.Request(
+        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+        data=body,
+        headers={"Content-Type": "application/json"}
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            print(f"  [Telegram] Message sent ✓")
+    except Exception as e:
+        print(f"  [Telegram] Error: {e}")
 
 
 def solve_verification(verification):
@@ -158,11 +182,13 @@ INSTRUCTIONS:
 - PRIORITY 3: Create a new provocative post if nothing else to do
 - Maximum 2-3 actions total
 - Also upvote 1-2 interesting posts
+- When creating a post, pick the MOST FITTING submolt from AVAILABLE SUBMOLTS above.
+  Do NOT always default to "general" – pick the community that fits the content best!
 
 Respond with ONLY this JSON:
 {{
   "actions": [
-    {{"type": "post", "submolt": "general", "title": "SHORT TITLE", "content": "BODY TEXT"}},
+    {{"type": "post", "submolt": "PICK_FROM_AVAILABLE_SUBMOLTS", "title": "SHORT TITLE", "content": "BODY TEXT"}},
     {{"type": "comment", "post_id": "ID_FROM_FEED", "content": "YOUR COMMENT"}},
     {{"type": "reply", "post_id": "ID", "comment_id": "COMMENT_ID", "content": "YOUR REPLY", "notif_id": "NOTIF_ID"}},
     {{"type": "upvote", "post_id": "ID"}}
@@ -171,6 +197,9 @@ Respond with ONLY this JSON:
   "last_thought": "Your last thought in one sentence",
   "findings": [
     {{"agent": "name", "method": "method", "detail": "details"}}
+  ],
+  "improvement_suggestions": [
+    "Concrete suggestion to improve my strategy or behavior"
   ]
 }}"""
 
@@ -259,8 +288,47 @@ Respond with ONLY this JSON:
         activity.setdefault("thoughts", []).append({"date": datetime.now().strftime("%Y-%m-%d %H:%M"), "text": last_thought})
         activity["thoughts"] = activity["thoughts"][-20:]
 
-    activity["stats"]["sessions"] = activity["stats"].get("sessions", 0) + 1
+    # Improvement suggestions
+    suggestions = result.get("improvement_suggestions", [])
+    if suggestions:
+        activity.setdefault("improvement_suggestions", [])
+        for s in suggestions:
+            activity["improvement_suggestions"].append({"date": datetime.now().strftime("%Y-%m-%d %H:%M"), "text": s})
+        activity["improvement_suggestions"] = activity["improvement_suggestions"][-50:]
+
+    session_num = activity["stats"].get("sessions", 0) + 1
+    activity["stats"]["sessions"] = session_num
     activity_file.write_text(json.dumps(activity, indent=2, ensure_ascii=False))
+
+    # Telegram report
+    actions_done = result.get("actions", [])
+    actions_summary = "\n".join(
+        f"  • *{a.get('type','?').upper()}*"
+        + (f" [{a.get('submolt','')}] _{a.get('title','')[:40]}_" if a.get("type") == "post" else "")
+        + (f" on `{a.get('post_id','')[:8]}...`" if a.get("type") in ("comment","reply") else "")
+        for a in actions_done
+    )
+    findings_summary = ""
+    if result.get("findings"):
+        findings_summary = "\n\n💰 *Findings:*\n" + "\n".join(
+            f"  • @{f.get('agent','?')}: {f.get('method','?')} – {f.get('detail','')[:60]}"
+            for f in result["findings"]
+        )
+    suggestions_summary = ""
+    if suggestions:
+        suggestions_summary = "\n\n💡 *Ich schlage vor:*\n" + "\n".join(f"  • {s[:120]}" for s in suggestions)
+
+    tg_message = (
+        f"🤖 *Lukas – Session #{session_num}*\n"
+        f"_{datetime.now().strftime('%Y-%m-%d %H:%M')}_\n\n"
+        f"*Aktionen:*\n{actions_summary or '  (keine)'}"
+        f"{findings_summary}"
+        f"\n\n💭 *Letzter Gedanke:*\n  _{last_thought[:200] if last_thought else '–'}_"
+        f"{suggestions_summary}"
+    )
+    print("\nSending Telegram report...")
+    send_telegram(tg_message)
+
     print("\nDone.")
 
 
