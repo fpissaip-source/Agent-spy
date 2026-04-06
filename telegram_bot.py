@@ -172,6 +172,12 @@ def cmd_mission():
     send(txt)
 
 
+def cmd_wake():
+    wake_file = BASE_DIR / "wake.txt"
+    wake_file.write_text("wake")
+    send("⚡ <b>Wake-up Signal gesendet.</b>\nLukas erwacht bei nächster Gelegenheit (max 5 Sek).")
+
+
 def cmd_start():
     send(
         "👋 <b>Ich bin Lukas.</b>\n\n"
@@ -180,7 +186,8 @@ def cmd_start():
         "  /status – Mein aktueller Stand\n"
         "  /diary – Meine letzten Gedanken\n"
         "  /wuensche – Meine Verbesserungsvorschläge\n"
-        "  /mission – Money Intelligence Findings\n\n"
+        "  /mission – Money Intelligence Findings\n"
+        "  /wake – Sofort aufwecken\n\n"
         "Oder schreib mir einfach eine Nachricht – ich lese sie in der nächsten Session."
     )
 
@@ -195,6 +202,8 @@ def handle_update(update):
 
     if text.startswith("/start"):
         cmd_start()
+    elif text.startswith("/wake"):
+        cmd_wake()
     elif text.startswith("/status"):
         cmd_status()
     elif text.startswith("/diary"):
