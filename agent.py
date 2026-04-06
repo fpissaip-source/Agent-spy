@@ -1097,13 +1097,39 @@ WICHTIG zu self_improvement: Schlage NICHTS vor – tu es einfach. Wenn du etwas
     (BASE_DIR / "next_wakeup.txt").write_text(str(next_wakeup))
     print(f"  Next wakeup in {next_wakeup} min.")
 
+    # Merge findings/tool_calls written by tools.py during this session (single-writer merge)
+    # tools.py log_finding() writes directly to activity.json; we must re-read before
+    # overwriting so we don't lose tool-generated findings from this session.
+    try:
+        if activity_file.exists():
+            disk = json.loads(activity_file.read_text())
+            # Merge on-disk findings not already in our in-memory list
+            seen_details = {f.get("detail", "") for f in memory.get("findings", [])}
+            for f in disk.get("findings", []):
+                if f.get("detail", "") not in seen_details:
+                    memory.setdefault("findings", []).append(f)
+                    seen_details.add(f.get("detail", ""))
+            # Keep findings list bounded
+            memory["findings"] = memory["findings"][-200:]
+            # Also merge any stats bumped by log_finding
+            disk_findings_count = disk.get("stats", {}).get("findings", 0)
+            memory["stats"]["findings"] = max(
+                memory["stats"].get("findings", 0),
+                disk_findings_count
+            )
+    except Exception:
+        pass
+
     # Load tool_calls into memory for dashboard display
+    # Clear stale tool_calls.json first so each session starts fresh
     tool_log_path = BASE_DIR / "tool_calls.json"
     if tool_log_path.exists():
         try:
             tc = json.loads(tool_log_path.read_text())
             memory.setdefault("tool_calls", []).extend(tc)
             memory["tool_calls"] = memory["tool_calls"][-100:]
+            # Rotate: write empty list so next session starts clean
+            tool_log_path.write_text("[]")
         except Exception:
             pass
 
