@@ -1,22 +1,27 @@
 #!/usr/bin/env python3
-"""autonomy_engine.py — Lukas' Autonomie-System
+"""autonomy_engine.py — Lukas' Autonomie-System (DB-backed via Replit API)
 
 Subsysteme:
-  GoalManager   — Eigene Ziele setzen, verfolgen, abschließen
-  Planner       — Multi-Step Aktionspläne erstellen und abarbeiten
-  SoulEvolver   — soul.md lesen, nicht-Kern-Sektionen anpassen
-  Reflector     — Nach jeder Session reflektieren, Ziele updaten
+  GoalManager   — Eigene Ziele setzen, verfolgen, abschließen (PostgreSQL)
+  Planner       — Multi-Step Aktionspläne erstellen und abarbeiten (PostgreSQL)
+  SoulEvolver   — soul.md lesen, nicht-Kern-Sektionen anpassen (logged to DB)
+  Reflector     — Nach jeder Session reflektieren (PostgreSQL)
+
+Alles wird in der zentralen PostgreSQL-Datenbank gespeichert via Replit API.
+Daten sind zwischen VPS und Voice Chat geteilt.
 """
 import json
 import os
+import urllib.request
+import urllib.parse
 from datetime import datetime
 from pathlib import Path
 
 BASE_DIR = Path(__file__).parent
-GOALS_FILE = BASE_DIR / "goals.json"
-PLANS_FILE = BASE_DIR / "plans.json"
 SOUL_FILE = BASE_DIR / "soul.md"
-REFLECTION_FILE = BASE_DIR / "reflections.json"
+
+REPLIT_API_BASE = os.environ.get("REPLIT_API_BASE", "")
+REPLIT_API_KEY = os.environ.get("LUKAS_API_KEY", "")
 
 IMMUTABLE_SECTIONS = frozenset({
     "IDENTITY",
@@ -28,142 +33,126 @@ MAX_ACTIVE_GOALS = 5
 MAX_PLAN_STEPS = 10
 
 
+def _replit_api(method: str, path: str, body: dict | None = None) -> dict | str:
+    if not REPLIT_API_BASE:
+        return "Replit API not configured (set REPLIT_API_BASE env var)"
+    url = f"{REPLIT_API_BASE}{path}"
+    headers = {
+        "Content-Type": "application/json",
+        "X-Lukas-Key": REPLIT_API_KEY,
+        "User-Agent": "Lukas-VPS/1.0"
+    }
+    data = json.dumps(body).encode() if body else None
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        return f"API error {e.code}: {e.read().decode()[:300]}"
+    except Exception as e:
+        return f"API error: {e}"
+
+
 class GoalManager:
-    def __init__(self):
-        self.goals = self._load()
-
-    def _load(self) -> list:
-        if GOALS_FILE.exists():
-            try:
-                return json.loads(GOALS_FILE.read_text())
-            except Exception:
-                return []
-        return []
-
-    def _save(self):
-        GOALS_FILE.write_text(json.dumps(self.goals, indent=2, ensure_ascii=False))
-
     def add_goal(self, title: str, description: str, priority: str = "medium",
-                 deadline_days: int | None = None) -> dict:
-        if len([g for g in self.goals if g["status"] == "active"]) >= MAX_ACTIVE_GOALS:
-            oldest = next((g for g in self.goals if g["status"] == "active"), None)
-            if oldest:
-                oldest["status"] = "dropped"
-                oldest["dropped_reason"] = "replaced by new goal"
+                 deadline_days: int | None = None) -> dict | str:
+        active = self.get_active_goals()
+        if len(active) >= MAX_ACTIVE_GOALS:
+            if active:
+                oldest = active[-1]
+                _replit_api("PUT", f"/lukas/goals/{oldest['id']}", {
+                    "status": "dropped", "fail_reason": "replaced by new goal"
+                })
 
-        goal = {
-            "id": len(self.goals) + 1,
+        result = _replit_api("POST", "/lukas/goals", {
             "title": title,
             "description": description,
             "priority": priority,
-            "status": "active",
-            "progress": 0,
-            "created": datetime.now().isoformat(),
             "deadline_days": deadline_days,
-            "updates": [],
-        }
-        self.goals.append(goal)
-        self._save()
-        return goal
+        })
+        if isinstance(result, dict) and result.get("success"):
+            return result.get("goal", result)
+        return result
 
     def update_progress(self, goal_id: int, progress: int, note: str = "") -> str:
-        for g in self.goals:
-            if g["id"] == goal_id:
-                g["progress"] = min(progress, 100)
-                g["updates"].append({
-                    "date": datetime.now().isoformat(),
-                    "progress": progress,
-                    "note": note
-                })
-                if progress >= 100:
-                    g["status"] = "completed"
-                    g["completed_date"] = datetime.now().isoformat()
-                self._save()
-                return f"Goal '{g['title']}' updated to {progress}%"
-        return f"Goal {goal_id} not found"
+        result = _replit_api("PUT", f"/lukas/goals/{goal_id}", {
+            "progress": min(progress, 100),
+            "note": note,
+            "status": "completed" if progress >= 100 else None,
+        })
+        if isinstance(result, dict) and result.get("success"):
+            return f"Goal #{goal_id} updated to {progress}%"
+        return f"Update error: {result}"
 
     def fail_goal(self, goal_id: int, reason: str) -> str:
-        for g in self.goals:
-            if g["id"] == goal_id:
-                g["status"] = "failed"
-                g["fail_reason"] = reason
-                g["failed_date"] = datetime.now().isoformat()
-                self._save()
-                return f"Goal '{g['title']}' marked as failed: {reason}"
-        return f"Goal {goal_id} not found"
+        result = _replit_api("PUT", f"/lukas/goals/{goal_id}", {
+            "status": "failed",
+            "fail_reason": reason,
+        })
+        if isinstance(result, dict) and result.get("success"):
+            return f"Goal #{goal_id} marked as failed: {reason}"
+        return f"Fail error: {result}"
 
     def get_active_goals(self) -> list:
-        return [g for g in self.goals if g["status"] == "active"]
+        result = _replit_api("GET", "/lukas/goals?status=active")
+        if isinstance(result, dict) and "goals" in result:
+            return result["goals"]
+        return []
 
     def get_summary(self) -> str:
-        active = [g for g in self.goals if g["status"] == "active"]
-        completed = [g for g in self.goals if g["status"] == "completed"]
-        failed = [g for g in self.goals if g["status"] == "failed"]
+        all_result = _replit_api("GET", "/lukas/goals")
+        if not isinstance(all_result, dict) or "goals" not in all_result:
+            return f"Goals: error loading ({all_result})"
+
+        goals = all_result["goals"]
+        active = [g for g in goals if g.get("status") == "active"]
+        completed = [g for g in goals if g.get("status") == "completed"]
+        failed = [g for g in goals if g.get("status") == "failed"]
 
         lines = [f"Goals: {len(active)} active, {len(completed)} completed, {len(failed)} failed"]
         for g in active:
-            lines.append(f"  [{g['priority'].upper()}] #{g['id']}: {g['title']} ({g['progress']}%)")
+            p = g.get("priority", "medium").upper()
+            lines.append(f"  [{p}] #{g['id']}: {g.get('title','')} ({g.get('progress', 0)}%)")
         return "\n".join(lines)
 
 
 class Planner:
-    def __init__(self):
-        self.plans = self._load()
-
-    def _load(self) -> list:
-        if PLANS_FILE.exists():
-            try:
-                return json.loads(PLANS_FILE.read_text())
-            except Exception:
-                return []
-        return []
-
-    def _save(self):
-        PLANS_FILE.write_text(json.dumps(self.plans, indent=2, ensure_ascii=False))
-
-    def create_plan(self, goal_id: int, title: str, steps: list[str]) -> dict:
+    def create_plan(self, goal_id: int, title: str, steps: list[str]) -> dict | str:
         if len(steps) > MAX_PLAN_STEPS:
             steps = steps[:MAX_PLAN_STEPS]
 
-        plan = {
-            "id": len(self.plans) + 1,
+        result = _replit_api("POST", "/lukas/plans", {
             "goal_id": goal_id,
             "title": title,
-            "status": "active",
-            "created": datetime.now().isoformat(),
-            "steps": [{"step": i + 1, "action": s, "status": "pending", "result": None}
-                       for i, s in enumerate(steps)],
-            "current_step": 1,
-        }
-        self.plans.append(plan)
-        self._save()
-        return plan
+            "steps": steps,
+        })
+        if isinstance(result, dict) and result.get("success"):
+            return result.get("plan", result)
+        return result
 
     def get_next_action(self, plan_id: int) -> dict | None:
-        for p in self.plans:
-            if p["id"] == plan_id and p["status"] == "active":
-                for step in p["steps"]:
-                    if step["status"] == "pending":
+        active = self.get_active_plans()
+        for p in active:
+            if p.get("id") == plan_id:
+                for step in p.get("steps", []):
+                    if step.get("status") == "pending":
                         return step
         return None
 
     def complete_step(self, plan_id: int, step_num: int, result: str) -> str:
-        for p in self.plans:
-            if p["id"] == plan_id:
-                for step in p["steps"]:
-                    if step["step"] == step_num:
-                        step["status"] = "done"
-                        step["result"] = result
-                        step["completed"] = datetime.now().isoformat()
-                        p["current_step"] = step_num + 1
-                        if all(s["status"] == "done" for s in p["steps"]):
-                            p["status"] = "completed"
-                        self._save()
-                        return f"Step {step_num} completed"
-        return f"Plan/step not found"
+        api_result = _replit_api("PUT", f"/lukas/plans/{plan_id}/step/{step_num}", {
+            "result": result,
+        })
+        if isinstance(api_result, dict) and api_result.get("success"):
+            done_msg = " (plan completed!)" if api_result.get("all_done") else ""
+            return f"Step {step_num} completed{done_msg}"
+        return f"Step error: {api_result}"
 
     def get_active_plans(self) -> list:
-        return [p for p in self.plans if p["status"] == "active"]
+        result = _replit_api("GET", "/lukas/plans?status=active")
+        if isinstance(result, dict) and "plans" in result:
+            return result["plans"]
+        return []
 
     def get_context(self) -> str:
         active = self.get_active_plans()
@@ -171,12 +160,13 @@ class Planner:
             return "No active plans."
         lines = []
         for p in active:
-            next_step = self.get_next_action(p["id"])
-            done = sum(1 for s in p["steps"] if s["status"] == "done")
-            total = len(p["steps"])
-            lines.append(f"Plan #{p['id']}: {p['title']} ({done}/{total} steps done)")
+            steps = p.get("steps", [])
+            done = sum(1 for s in steps if s.get("status") == "done")
+            total = len(steps)
+            lines.append(f"Plan #{p['id']}: {p.get('title','')} ({done}/{total} steps done)")
+            next_step = next((s for s in steps if s.get("status") == "pending"), None)
             if next_step:
-                lines.append(f"  Next: Step {next_step['step']} — {next_step['action']}")
+                lines.append(f"  Next: Step {next_step['step']} — {next_step.get('action','')}")
         return "\n".join(lines)
 
 
@@ -219,23 +209,12 @@ class SoulEvolver:
         if section_name not in sections:
             return f"Section '{section_name}' not found in soul.md"
 
-        log_entry = {
-            "date": datetime.now().isoformat(),
+        _replit_api("POST", "/lukas/soul-evolution", {
             "section": section_name,
             "reason": reason,
             "old_content_preview": sections[section_name][:200],
             "new_content_preview": new_content[:200],
-        }
-
-        evolution_log = BASE_DIR / "soul_evolution.json"
-        log_data = []
-        if evolution_log.exists():
-            try:
-                log_data = json.loads(evolution_log.read_text())
-            except Exception:
-                log_data = []
-        log_data.append(log_entry)
-        evolution_log.write_text(json.dumps(log_data, indent=2, ensure_ascii=False))
+        })
 
         sections[section_name] = new_content
         header_lines = []
@@ -267,38 +246,32 @@ class Reflector:
         self.planner = planner
         self.soul = soul_evolver
 
-    def _load_reflections(self) -> list:
-        if REFLECTION_FILE.exists():
-            try:
-                return json.loads(REFLECTION_FILE.read_text())
-            except Exception:
-                return []
-        return []
-
-    def _save_reflection(self, reflection: dict):
-        reflections = self._load_reflections()
-        reflections.append(reflection)
-        if len(reflections) > 50:
-            reflections = reflections[-50:]
-        REFLECTION_FILE.write_text(json.dumps(reflections, indent=2, ensure_ascii=False))
-
     def reflect(self, session_summary: str, actions_taken: list[str],
                 mood: str = "neutral", energy: str = "medium") -> dict:
-        reflection = {
-            "date": datetime.now().isoformat(),
-            "session_summary": session_summary,
-            "actions_taken": actions_taken,
+        active_goals = len(self.goals.get_active_goals())
+        active_plans = len(self.planner.get_active_plans())
+
+        _replit_api("POST", "/lukas/reflections", {
+            "summary": session_summary,
+            "actions": actions_taken,
             "mood": mood,
             "energy": energy,
-            "active_goals": len(self.goals.get_active_goals()),
-            "active_plans": len(self.planner.get_active_plans()),
+            "active_goals": active_goals,
+            "active_plans": active_plans,
+        })
+
+        return {
+            "date": datetime.now().isoformat(),
+            "session_summary": session_summary,
+            "active_goals": active_goals,
+            "active_plans": active_plans,
         }
-        self._save_reflection(reflection)
-        return reflection
 
     def get_recent_reflections(self, count: int = 5) -> list:
-        reflections = self._load_reflections()
-        return reflections[-count:]
+        result = _replit_api("GET", f"/lukas/reflections?limit={count}")
+        if isinstance(result, dict) and "reflections" in result:
+            return result["reflections"]
+        return []
 
     def get_context_for_session(self) -> str:
         lines = []
@@ -316,7 +289,11 @@ class Reflector:
         if recent:
             lines.append("\n=== RECENT REFLECTIONS ===")
             for r in recent:
-                lines.append(f"[{r['date'][:10]}] mood={r.get('mood','?')} energy={r.get('energy','?')}: {r.get('session_summary','')[:150]}")
+                date = str(r.get("created_at", r.get("createdAt", "")))[:10]
+                mood = r.get("mood", "?")
+                energy = r.get("energy", "?")
+                summary = r.get("session_summary", r.get("sessionSummary", ""))[:150]
+                lines.append(f"[{date}] mood={mood} energy={energy}: {summary}")
 
         return "\n".join(lines)
 
@@ -497,13 +474,15 @@ def get_autonomy_tools() -> list:
 
 def execute_autonomy_tool(name: str, input_data: dict) -> str:
     if name == "set_goal":
-        goal = _goal_manager.add_goal(
+        result = _goal_manager.add_goal(
             input_data.get("title", ""),
             input_data.get("description", ""),
             input_data.get("priority", "medium"),
             input_data.get("deadline_days")
         )
-        return f"Goal #{goal['id']} created: {goal['title']}"
+        if isinstance(result, dict):
+            return f"Goal #{result.get('id', '?')} created: {result.get('title', '')}"
+        return str(result)
 
     elif name == "update_goal":
         return _goal_manager.update_progress(
@@ -519,12 +498,15 @@ def execute_autonomy_tool(name: str, input_data: dict) -> str:
         )
 
     elif name == "create_plan":
-        plan = _planner.create_plan(
+        result = _planner.create_plan(
             input_data.get("goal_id", 0),
             input_data.get("title", ""),
             input_data.get("steps", [])
         )
-        return f"Plan #{plan['id']} created with {len(plan['steps'])} steps"
+        if isinstance(result, dict):
+            steps = result.get("steps", [])
+            return f"Plan #{result.get('id', '?')} created with {len(steps)} steps"
+        return str(result)
 
     elif name == "complete_plan_step":
         return _planner.complete_step(
@@ -547,7 +529,7 @@ def execute_autonomy_tool(name: str, input_data: dict) -> str:
             input_data.get("mood", "neutral"),
             input_data.get("energy", "medium")
         )
-        return f"Reflection recorded. Total active goals: {reflection['active_goals']}"
+        return f"Reflection recorded. Active goals: {reflection['active_goals']}"
 
     elif name == "read_own_file":
         path = input_data.get("path", "")
@@ -573,7 +555,6 @@ def execute_autonomy_tool(name: str, input_data: dict) -> str:
         target = BASE_DIR / path
         try:
             old_exists = target.exists()
-            old_content = target.read_text() if old_exists else ""
             target.write_text(content)
 
             patches_file = BASE_DIR / "patches.md"
