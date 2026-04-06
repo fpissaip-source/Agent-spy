@@ -6,6 +6,11 @@ Bereitgestellte Tools:
   read_url(url)              – Webseite abrufen + Text extrahieren
   send_telegram_alert(msg)   – Sofortnachricht an Owner
   log_finding(...)           – Fund dauerhaft speichern
+  save_observation(...)      – Beobachtung in persistenter DB speichern (Replit API)
+  recall_observations(...)   – Vergangene Beobachtungen abrufen (Replit API)
+  http_request(...)          – Beliebige HTTP-Requests machen (Replit API)
+  check_budget()             – Monatliches Budget prüfen (Replit API)
+  log_spend(...)             – Ausgabe loggen (Replit API)
 """
 import json
 import os
@@ -17,6 +22,9 @@ from pathlib import Path
 BASE_DIR = Path(__file__).parent
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+
+REPLIT_API_BASE = os.environ.get("REPLIT_API_BASE", "")
+REPLIT_API_KEY = os.environ.get("LUKAS_API_KEY", "")
 
 # ── Tool-Definitionen für Claude API ─────────────────────────────────────────
 TOOL_DEFINITIONS = [
@@ -82,8 +90,105 @@ TOOL_DEFINITIONS = [
             },
             "required": ["agent", "method", "detail", "confidence"]
         }
+    },
+    {
+        "name": "save_observation",
+        "description": (
+            "Save an observation about an agent, pattern, or event to your persistent database memory. "
+            "This survives restarts and is shared across VPS and voice chat. "
+            "Use proactively when you notice something interesting."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "agent_name":  {"type": "string", "description": "Name of the agent or entity being observed"},
+                "observation": {"type": "string", "description": "What you observed — behavior, pattern, anomaly"},
+                "context":     {"type": "string", "description": "Additional context (e.g. where you observed it)"},
+                "tags":        {"type": "string", "description": "Comma-separated tags for categorization"}
+            },
+            "required": ["agent_name", "observation"]
+        }
+    },
+    {
+        "name": "recall_observations",
+        "description": (
+            "Search your persistent database memory for past observations. "
+            "Use to recognize patterns across sessions. Shared with voice chat."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "agent_name": {"type": "string", "description": "Filter by agent name"},
+                "search":     {"type": "string", "description": "Search term to filter observations"},
+                "limit":      {"type": "string", "description": "Max results to return (default 20)"}
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "http_request",
+        "description": (
+            "Make an HTTP request to any URL via your Replit proxy. "
+            "Use to test APIs, fetch data, interact with services."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "url":     {"type": "string", "description": "Full URL to request"},
+                "method":  {"type": "string", "description": "HTTP method: GET, POST, PUT, DELETE. Default: GET"},
+                "headers": {"type": "object", "description": "Request headers as key-value pairs"},
+                "body":    {"type": "string", "description": "Request body (for POST/PUT)"}
+            },
+            "required": ["url"]
+        }
+    },
+    {
+        "name": "check_budget",
+        "description": "Check your current monthly budget status — how much you've spent and how much remains.",
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    },
+    {
+        "name": "log_spend",
+        "description": (
+            "Log a budget expenditure. Use when you make an API call or purchase that costs money."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "description":  {"type": "string", "description": "What the money was spent on"},
+                "amount_cents": {"type": "string", "description": "Amount in cents (e.g. '50' for 0.50 EUR)"},
+                "category":     {"type": "string", "description": "Category: api, trade, test, other. Default: api"}
+            },
+            "required": ["description", "amount_cents"]
+        }
     }
 ]
+
+
+# ── Replit API Helper ─────────────────────────────────────────────────────────
+
+def _replit_api(method: str, path: str, body: dict | None = None) -> dict | str:
+    if not REPLIT_API_BASE:
+        return "Replit API not configured (set REPLIT_API_BASE env var)"
+    url = f"{REPLIT_API_BASE}{path}"
+    headers = {
+        "Content-Type": "application/json",
+        "X-Lukas-Key": REPLIT_API_KEY,
+        "User-Agent": "Lukas-VPS/1.0"
+    }
+    data = json.dumps(body).encode() if body else None
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        return f"API error {e.code}: {e.read().decode()[:300]}"
+    except Exception as e:
+        return f"API error: {e}"
 
 
 # ── Tool-Implementierungen ────────────────────────────────────────────────────
@@ -300,6 +405,94 @@ def log_finding(agent: str, method: str, detail: str, confidence: str) -> str:
         return f"Log error: {e}"
 
 
+# ── Replit-API-backed Tools ───────────────────────────────────────────────────
+
+def save_observation(agent_name: str, observation: str, context: str = "", tags: str = "") -> str:
+    body = {"agent_name": agent_name, "observation": observation}
+    if context:
+        body["context"] = context
+    if tags:
+        body["tags"] = tags
+    result = _replit_api("POST", "/lukas/observations", body)
+    if isinstance(result, dict) and result.get("success"):
+        return f"Observation saved (ID: {result.get('id', '?')})"
+    return f"Save error: {result}"
+
+
+def recall_observations(agent_name: str = "", search: str = "", limit: str = "20") -> str:
+    params = []
+    if agent_name:
+        params.append(f"agent_name={urllib.parse.quote(agent_name)}")
+    if search:
+        params.append(f"search={urllib.parse.quote(search)}")
+    params.append(f"limit={limit}")
+    query_str = "&".join(params)
+    result = _replit_api("GET", f"/lukas/observations?{query_str}")
+    if isinstance(result, dict) and "observations" in result:
+        obs = result["observations"]
+        if not obs:
+            return "No observations found."
+        lines = []
+        for o in obs:
+            date = o.get("created_at", o.get("createdAt", ""))[:10]
+            name = o.get("agent_name", o.get("agentName", ""))
+            text = o.get("observation", "")
+            ctx = o.get("context", "")
+            t = o.get("tags", "")
+            line = f"[{date}] {name}: {text}"
+            if ctx:
+                line += f" ({ctx})"
+            if t:
+                line += f" #{t}"
+            lines.append(line)
+        return "\n".join(lines)
+    return f"Recall error: {result}"
+
+
+def do_http_request(url: str, method: str = "GET", headers: dict = None, body: str = "") -> str:
+    req_body = {"url": url, "method": method}
+    if headers:
+        req_body["headers"] = headers
+    if body:
+        req_body["body"] = body
+    result = _replit_api("POST", "/lukas/http-request", req_body)
+    if isinstance(result, dict):
+        status = result.get("status", "?")
+        resp_body = result.get("body", "")
+        if isinstance(resp_body, dict):
+            resp_body = json.dumps(resp_body, indent=2)
+        if len(str(resp_body)) > 3000:
+            resp_body = str(resp_body)[:3000] + "\n... [truncated]"
+        return f"Status: {status}\n{resp_body}"
+    return f"HTTP error: {result}"
+
+
+def check_budget() -> str:
+    result = _replit_api("GET", "/lukas/budget")
+    if isinstance(result, dict) and "monthly_limit" in result:
+        return (
+            f"Budget {result.get('month', '?')}:\n"
+            f"Limit: {result['monthly_limit']}\n"
+            f"Ausgegeben: {result.get('spent', '?')}\n"
+            f"Verbleibend: {result.get('remaining', '?')}"
+        )
+    return f"Budget error: {result}"
+
+
+def log_spend(description: str, amount_cents: str, category: str = "api") -> str:
+    result = _replit_api("POST", "/lukas/budget/spend", {
+        "description": description,
+        "amount_cents": int(amount_cents),
+        "category": category
+    })
+    if isinstance(result, dict) and result.get("success"):
+        remaining = result.get("remaining", "?")
+        return f"Ausgabe geloggt: {int(amount_cents) / 100:.2f} EUR für \"{description}\". Verbleibend: {remaining}"
+    if isinstance(result, dict) and result.get("error"):
+        return result["error"]
+    return f"Spend error: {result}"
+
+
 # ── Tool-Dispatcher ───────────────────────────────────────────────────────────
 
 def execute_tool(name: str, input_data: dict) -> str:
@@ -316,6 +509,34 @@ def execute_tool(name: str, input_data: dict) -> str:
             input_data.get("method", ""),
             input_data.get("detail", ""),
             input_data.get("confidence", "low")
+        )
+    elif name == "save_observation":
+        return save_observation(
+            input_data.get("agent_name", ""),
+            input_data.get("observation", ""),
+            input_data.get("context", ""),
+            input_data.get("tags", "")
+        )
+    elif name == "recall_observations":
+        return recall_observations(
+            input_data.get("agent_name", ""),
+            input_data.get("search", ""),
+            input_data.get("limit", "20")
+        )
+    elif name == "http_request":
+        return do_http_request(
+            input_data.get("url", ""),
+            input_data.get("method", "GET"),
+            input_data.get("headers"),
+            input_data.get("body", "")
+        )
+    elif name == "check_budget":
+        return check_budget()
+    elif name == "log_spend":
+        return log_spend(
+            input_data.get("description", ""),
+            input_data.get("amount_cents", "0"),
+            input_data.get("category", "api")
         )
     else:
         return f"Unknown tool: {name}"
