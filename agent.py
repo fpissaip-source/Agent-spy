@@ -596,12 +596,16 @@ def main():
         )
 
     # ── One-time ChromaDB migration from existing JSON files ─────────────
-    if MEMORY_AVAILABLE and memory_count() == 0:
+    _migrate_sentinel = BASE_DIR / "chroma_db" / ".migrated"
+    if MEMORY_AVAILABLE and not _migrate_sentinel.exists():
         _mig = BASE_DIR / "migrate.py"
         if _mig.exists():
-            print("[memory] Empty DB — running migrate.py to import history...")
+            print("[memory] Sentinel absent — running migrate.py to import history...")
             import subprocess
-            subprocess.run(["python3", str(_mig)], timeout=300)
+            _mig_result = subprocess.run(["python3", str(_mig)], timeout=300)
+            if _mig_result.returncode == 0:
+                _migrate_sentinel.parent.mkdir(parents=True, exist_ok=True)
+                _migrate_sentinel.write_text("migrated")
 
     # ── ChromaDB semantic memory retrieval ───────────────────────────────
     _feed_titles = " ".join(
@@ -870,7 +874,8 @@ WICHTIG zu self_improvement: Schlage NICHTS vor – tu es einfach. Wenn du etwas
             memory["stats"]["posts"] = memory["stats"].get("posts", 0) + 1
             add_memory(
                 f"I posted [{submolt}]: {title}\n{content[:400]}",
-                {"type": "post", "date": now_str, "post_id": new_post_id, "submolt": submolt}
+                {"type": "post", "date": now_str, "post_id": new_post_id,
+                 "submolt": submolt, "tags": f"post {submolt}"}
             )
             send_telegram(
                 f"📝 <b>Post erstellt</b> [{submolt}]\n"
@@ -898,7 +903,7 @@ WICHTIG zu self_improvement: Schlage NICHTS vor – tu es einfach. Wenn du etwas
             memory["stats"]["comments"] = memory["stats"].get("comments", 0) + 1
             add_memory(
                 f"I commented on post {post_id}: {content[:400]}",
-                {"type": "comment", "date": now_str, "post_id": post_id}
+                {"type": "comment", "date": now_str, "post_id": post_id, "tags": "comment social"}
             )
             send_telegram(
                 f"💬 <b>Kommentar</b> auf post {post_id[:10]}\n"
@@ -953,7 +958,8 @@ WICHTIG zu self_improvement: Schlage NICHTS vor – tu es einfach. Wenn du etwas
             _reply_to = original.get("from_agent", "?") if original else "?"
             add_memory(
                 f"I replied to @{_reply_to} on post {post_id}: {content[:400]}",
-                {"type": "reply", "date": now_str, "post_id": post_id, "agent": _reply_to}
+                {"type": "reply", "date": now_str, "post_id": post_id,
+                 "agent": _reply_to, "tags": f"reply social {_reply_to}"}
             )
             send_telegram(
                 f"↩️ <b>Reply</b> an @{_reply_to}\n"
@@ -1008,7 +1014,8 @@ WICHTIG zu self_improvement: Schlage NICHTS vor – tu es einfach. Wenn du etwas
             add_memory(
                 f"I remember @{m.get('agent','')}: {m.get('content','')}\n"
                 f"Why it matters: {m.get('why','')}",
-                {"type": "impression", "date": now_str, "agent": m.get("agent", "")}
+                {"type": "impression", "date": now_str, "agent": m.get("agent", ""),
+                 "tags": f"impression {m.get('agent','')}"}
             )
     memory["impressions"] = memory.get("impressions", [])[-100:]
 
@@ -1020,7 +1027,8 @@ WICHTIG zu self_improvement: Schlage NICHTS vor – tu es einfach. Wenn du etwas
         add_memory(
             f"Finding: @{f.get('agent','')} method={f.get('method','')} "
             f"detail={f.get('detail','')} confidence={f.get('confidence','')}",
-            {"type": "finding", "date": now_str, "agent": f.get("agent", "")}
+            {"type": "finding", "date": now_str, "agent": f.get("agent", ""),
+             "tags": f"finding {f.get('confidence','')} {f.get('agent','')}"}
         )
 
     # Save diary entry
@@ -1031,7 +1039,8 @@ WICHTIG zu self_improvement: Schlage NICHTS vor – tu es einfach. Wenn du etwas
             f.write(f"\n\n## [{now_str}] – Session #{session_num}\n\n{diary_entry}\n")
         add_memory(
             f"Diary [{now_str}] Session #{session_num}:\n{diary_entry[:600]}",
-            {"type": "diary", "date": now_str, "session": str(session_num)}
+            {"type": "diary", "date": now_str, "session": str(session_num),
+             "tags": "diary introspection"}
         )
         print("\nDiary updated.")
 
