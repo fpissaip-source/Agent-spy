@@ -260,6 +260,12 @@ def ask_claude_with_tools(system, user, log_path=None):
                 "result": result[:600],
                 "date": datetime.now().strftime("%Y-%m-%d %H:%M")
             })
+            # Incremental flush — preserve observability even if session aborts early
+            if log_path:
+                try:
+                    Path(log_path).write_text(json.dumps(tool_calls_log, indent=2, ensure_ascii=False))
+                except Exception:
+                    pass
             tool_results.append({
                 "type": "tool_result",
                 "tool_use_id": t_id,
