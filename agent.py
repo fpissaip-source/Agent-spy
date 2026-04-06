@@ -488,6 +488,14 @@ Respond ONLY this JSON:
       "method_vocab": "spread arbitrage / on-chain / etc",
       "last_contact": "post or comment ID"
     }}
+  ],
+  "self_improvement": [
+    {{
+      "file": "agent.py OR soul.md",
+      "description": "Why this change improves you",
+      "old_code": "EXACT existing code to replace (copy-paste from source, must match perfectly)",
+      "new_code": "New code that replaces it"
+    }}
   ]
 }}"""
 
@@ -688,6 +696,13 @@ Respond ONLY this JSON:
         for s in suggestions:
             memory["improvement_suggestions"].append({"date": now_str, "text": s})
         memory["improvement_suggestions"] = memory["improvement_suggestions"][-50:]
+
+    # Write self-improvement patches for patcher.py to apply
+    self_improvement = result.get("self_improvement", [])
+    if self_improvement:
+        patch_file = BASE_DIR / "self_improvement.json"
+        patch_file.write_text(json.dumps(self_improvement, indent=2, ensure_ascii=False))
+        print(f"  Self-improvement: {len(self_improvement)} patch(es) queued for patcher.py")
 
     # Save emotional state
     emotional_update = result.get("emotional_update", {})

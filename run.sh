@@ -14,10 +14,13 @@ while true; do
     echo "=== LUKAS AKTIV: $(date) ==="
     python3 agent.py
 
+    # Apply any self-improvement patches Lukas wrote
+    python3 patcher.py
+
     # Auto-sync memories to git
-    git add diary.md activity.json core_beliefs.md 2>/dev/null
+    git add diary.md activity.json core_beliefs.md patches.md 2>/dev/null
     git commit -m "sync: session $(date +%Y-%m-%d-%H%M)" 2>/dev/null || true
-    git push origin HEAD:claude/enhance-hero-ai-animation-fqlEe 2>/dev/null || true
+    git push origin HEAD:claude/bot-communication-system-eriiT 2>/dev/null || true
 
     # Dynamic sleep – Lukas decides how long he sleeps
     SLEEP_MIN=30
