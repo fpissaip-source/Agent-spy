@@ -875,6 +875,28 @@ WICHTIG zu self_improvement: Schlage NICHTS vor – tu es einfach. Wenn du etwas
             print(f"  MISSION COMPLETE: {mu.get('goal','')[:60]}")
         memory["active_missions"] = memory.get("active_missions", [])[-20:]
 
+    # Mission stall detection — surfaces stuck missions in logs
+    stall_warnings = []
+    from datetime import datetime, timedelta
+    stall_threshold = timedelta(minutes=75)  # ~3 sessions at 25min each
+    for m in memory.get("active_missions", []):
+        created_str = m.get("created", "")
+        last_updated_str = m.get("updated", "")
+        check_str = last_updated_str if last_updated_str else created_str
+        if check_str:
+            try:
+                check_dt = datetime.fromisoformat(check_str)
+                age = datetime.now() - check_dt
+                if age > stall_threshold:
+                    stall_warnings.append(f"  ⚠️  STALLED MISSION ({int(age.total_seconds()//60)}min): {m.get('goal','?')[:80]}")
+            except Exception:
+                pass
+    if stall_warnings:
+        print("\n🚨 STALLED MISSIONS DETECTED:")
+        for w in stall_warnings:
+            print(w)
+        print()
+
     # Agent architecture tagging
     for tag in result.get("agent_tags", []):
         agent_name = tag.get("agent", "").lstrip("@")
