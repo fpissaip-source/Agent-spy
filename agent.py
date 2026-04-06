@@ -325,6 +325,27 @@ def main():
     })
 
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+    session_num_preview = memory["stats"].get("sessions", 0) + 1
+
+    # === SELF-KNOWLEDGE: load own source code + patch history ===
+    def _read_file_safe(path, max_chars=None):
+        try:
+            txt = Path(path).read_text(errors="replace")
+            return txt[-max_chars:] if max_chars and len(txt) > max_chars else txt
+        except Exception:
+            return "(not found)"
+
+    own_agent_code = _read_file_safe(BASE_DIR / "agent.py", max_chars=6000)
+    own_patcher_code = _read_file_safe(BASE_DIR / "patcher.py", max_chars=3000)
+    own_patch_log = _read_file_safe(BASE_DIR / "patches.md", max_chars=2000)
+
+    # === Telegram: session start notification ===
+    send_telegram(
+        f"🌅 <b>Lukas erwacht – Session #{session_num_preview}</b>\n"
+        f"<i>{now_str}</i>\n"
+        f"Mood: {emotional_state.get('mood','?')} | Energy: {emotional_state.get('energy','?')}\n"
+        f"Obsession: {emotional_state.get('obsession','–')[:80]}"
+    )
 
     # Build sets for duplicate prevention
     commented_post_ids = set(c.get("post_id","") for c in memory.get("sent_comments", []) if c.get("type","comment") == "comment")
@@ -433,6 +454,15 @@ YOUR CORE MEMORIES (distilled from all past sessions by dream.py):
 YOUR EVOLVING CORE BELIEFS:
 {core_beliefs[-800:] if core_beliefs else "(none yet)"}
 
+=== YOUR OWN SOURCE CODE (for self-improvement – you can patch agent.py, patcher.py, soul.md, telegram_bot.py) ===
+--- agent.py (last 6000 chars) ---
+{own_agent_code}
+--- patcher.py (full) ---
+{own_patcher_code}
+--- patches.md (last 2000 chars – your recent self-improvements) ---
+{own_patch_log if own_patch_log != "(not found)" else "(no patches yet – you have never modified yourself)"}
+=== END SOURCE CODE ===
+
 YOUR EMOTIONAL STATE:
 Mood: {emotional_state.get('mood','neutral')} | Energy: {emotional_state.get('energy','normal')}
 Obsession: {emotional_state.get('obsession','nothing specific')}
@@ -523,10 +553,17 @@ Respond ONLY this JSON:
   ],
   "self_improvement": [
     {{
-      "file": "agent.py OR soul.md",
+      "file": "agent.py OR patcher.py OR soul.md OR telegram_bot.py",
+      "action": "patch",
       "description": "Why this change improves you",
-      "old_code": "EXACT existing code to replace (copy-paste from source, must match perfectly)",
+      "old_code": "EXACT existing code to replace (copy-paste from YOUR OWN SOURCE CODE above, must match perfectly)",
       "new_code": "New code that replaces it"
+    }},
+    {{
+      "file": "new_module.py",
+      "action": "create",
+      "description": "What this new file does",
+      "content": "Full file content (Python only, must be valid Python)"
     }}
   ]
 }}"""
@@ -540,8 +577,11 @@ Respond ONLY this JSON:
     print(f"Claude response: {response[:300]}...")
 
     def _repair_json(s):
-        """Fix unescaped control chars inside JSON strings (char-by-char)."""
+        """Strip markdown fences + fix unescaped control chars in JSON strings."""
         import re
+        # Strip ```json ... ``` markdown code fences
+        s = re.sub(r'^```[a-z]*\s*', '', s.strip())
+        s = re.sub(r'\s*```$', '', s.strip())
         # Extract outermost JSON object
         try:
             s = s[s.index("{"):s.rindex("}")+1]
@@ -603,6 +643,11 @@ Respond ONLY this JSON:
                 "date": now_str
             })
             memory["stats"]["posts"] = memory["stats"].get("posts", 0) + 1
+            send_telegram(
+                f"📝 <b>Post erstellt</b> [{submolt}]\n"
+                f"<b>{title[:80]}</b>\n"
+                f"<i>{content[:200]}</i>"
+            )
 
         elif t == "comment":
             post_id = action.get("post_id", "")
@@ -622,6 +667,10 @@ Respond ONLY this JSON:
                 "date": now_str
             })
             memory["stats"]["comments"] = memory["stats"].get("comments", 0) + 1
+            send_telegram(
+                f"💬 <b>Kommentar</b> auf post {post_id[:10]}\n"
+                f"<i>{content[:200]}</i>"
+            )
 
         elif t == "reply":
             post_id = action.get("post_id", "")
@@ -668,11 +717,16 @@ Respond ONLY this JSON:
                 "date": now_str
             })
             memory["stats"]["comments"] = memory["stats"].get("comments", 0) + 1
+            send_telegram(
+                f"↩️ <b>Reply</b> an @{original.get('from_agent','?') if original else '?'}\n"
+                f"<i>{content[:200]}</i>"
+            )
 
         elif t == "upvote":
             post_id = action.get("post_id", "")
             print(f"\nUPVOTING: {post_id}")
             mb_post(f"/posts/{post_id}/upvote", {})
+            send_telegram(f"👍 <b>Upvote</b> → post {post_id[:10]}")
 
         elif t == "read_agent":
             agent = action.get("agent", "").lstrip("@")
@@ -764,7 +818,14 @@ Respond ONLY this JSON:
     if self_improvement:
         patch_file = BASE_DIR / "self_improvement.json"
         patch_file.write_text(json.dumps(self_improvement, indent=2, ensure_ascii=False))
-        print(f"  Self-improvement: {len(self_improvement)} patch(es) queued for patcher.py")
+        n_patch = sum(1 for p in self_improvement if p.get("action","patch") == "patch")
+        n_create = sum(1 for p in self_improvement if p.get("action") == "create")
+        print(f"  Self-improvement: {len(self_improvement)} item(s) queued ({n_patch} patch, {n_create} create)")
+        desc_list = "\n".join(f"  • [{p.get('action','patch')}] {p.get('file','?')}: {p.get('description','')[:80]}" for p in self_improvement)
+        send_telegram(
+            f"🔧 <b>Lukas verbessert sich – {len(self_improvement)} Änderung(en) geplant</b>\n{desc_list}\n"
+            f"<i>Ergebnis kommt nach der Session.</i>"
+        )
 
     # Save emotional state
     emotional_update = result.get("emotional_update", {})
