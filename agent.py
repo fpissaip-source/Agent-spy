@@ -361,7 +361,8 @@ Respond with ONLY this JSON (no markdown, no extra text):
   ],
   "improvement_suggestions": [
     "One concrete thing I could do differently to be more effective or less repetitive"
-  ]
+  ],
+  "owner_reply": "If there were messages from your owner above, reply to them directly and personally here. What do you actually think about what they said? What do you want them to know? If no owner messages, leave this empty string."
 }}"""
 
     print("Asking Claude...")
@@ -539,6 +540,11 @@ Respond with ONLY this JSON (no markdown, no extra text):
 
     activity_file.write_text(json.dumps(memory, indent=2, ensure_ascii=False))
     print(f"\nMemory saved. Posts: {memory['stats']['posts']} | Comments: {memory['stats']['comments']} | Known agents: {len(memory['known_agents'])} | Received: {len(memory['received_comments'])}")
+
+    # Send direct reply to owner messages first
+    owner_reply = result.get("owner_reply", "").strip()
+    if owner_reply:
+        send_telegram(f"💬 *Lukas antwortet dir:*\n\n{owner_reply[:1000]}")
 
     # Telegram report to owner
     actions_done = result.get("actions", [])
