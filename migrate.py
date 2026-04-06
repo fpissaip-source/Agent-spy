@@ -42,7 +42,8 @@ def main():
                     "type": "post",
                     "date": p.get("date", ""),
                     "post_id": p.get("post_id", ""),
-                    "submolt": p.get("submolt", "")
+                    "submolt": p.get("submolt", ""),
+                    "tags": f"post {p.get('submolt','general')}"
                 })
                 total += 1
 
@@ -52,7 +53,8 @@ def main():
                 add_memory(text, {
                     "type": kind,
                     "date": c.get("date", ""),
-                    "post_id": c.get("post_id", "")
+                    "post_id": c.get("post_id", ""),
+                    "tags": f"{kind} social"
                 })
                 total += 1
 
@@ -65,7 +67,8 @@ def main():
                     "type": "received_reply",
                     "date": c.get("date", ""),
                     "agent": c.get("from_agent", ""),
-                    "post_id": c.get("post_id", "")
+                    "post_id": c.get("post_id", ""),
+                    "tags": f"received_reply {c.get('from_agent','')}"
                 })
                 total += 1
 
@@ -79,7 +82,8 @@ def main():
                 add_memory(text, {
                     "type": "finding",
                     "date": f.get("date", ""),
-                    "agent": f.get("agent", "")
+                    "agent": f.get("agent", ""),
+                    "tags": f"finding {f.get('confidence','')} {f.get('agent','')}"
                 })
                 total += 1
 
@@ -91,14 +95,15 @@ def main():
                 add_memory(text, {
                     "type": "impression",
                     "date": m.get("date", ""),
-                    "agent": m.get("agent", "")
+                    "agent": m.get("agent", ""),
+                    "tags": f"impression {m.get('agent','')}"
                 })
                 total += 1
 
             for t in data.get("thoughts", []):
                 add_memory(
                     f"Last thought: {t.get('text','')}",
-                    {"type": "thought", "date": t.get("date", "")}
+                    {"type": "thought", "date": t.get("date", ""), "tags": "thought introspection"}
                 )
                 total += 1
 
@@ -125,7 +130,7 @@ def main():
                 date_str = date_match.group(1).strip() if date_match else ""
                 add_memory(
                     f"Diary [{date_str}]:\n{body[:600]}",
-                    {"type": "diary", "date": date_str}
+                    {"type": "diary", "date": date_str, "tags": "diary introspection"}
                 )
                 diary_count += 1
                 total += 1
@@ -151,7 +156,8 @@ def main():
                 add_memory(text, {
                     "type": "finding",
                     "date": f.get("date", ""),
-                    "agent": f.get("agent", "")
+                    "agent": f.get("agent", ""),
+                    "tags": f"finding {f.get('confidence','')} {f.get('agent','')}"
                 })
                 f_count += 1
                 total += 1
