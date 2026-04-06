@@ -122,18 +122,93 @@ def search_web(query: str) -> str:
         return f"Search error: {e}"
 
 
+_BLOCKED_HOSTS = frozenset({
+    "169.254.169.254",       # AWS/GCP/Azure IMDS
+    "metadata.google.internal",
+    "169.254.170.2",         # ECS task metadata
+    "instance-data.ec2.internal",
+    "metadata.internal",
+})
+
+_PRIVATE_RANGES = [
+    # IPv4 private, loopback, link-local, CGNAT
+    (0x7F000000, 0xFF000000),   # 127.0.0.0/8  loopback
+    (0x0A000000, 0xFF000000),   # 10.0.0.0/8
+    (0xAC100000, 0xFFF00000),   # 172.16.0.0/12
+    (0xC0A80000, 0xFFFF0000),   # 192.168.0.0/16
+    (0xA9FE0000, 0xFFFF0000),   # 169.254.0.0/16 link-local
+    (0xC6120000, 0xFFFE0000),   # 198.18.0.0/15 benchmarking
+    (0xE0000000, 0xF0000000),   # 224.0.0.0/4  multicast
+    (0x00000000, 0xFF000000),   # 0.0.0.0/8    unspecified
+    (0xFFFFFFFF, 0xFFFFFFFF),   # 255.255.255.255
+]
+
+
+def _is_safe_url(url: str) -> tuple[bool, str]:
+    """Return (safe, reason). Blocks SSRF targets."""
+    import ipaddress
+    import socket
+    import re
+    try:
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return False, "Only http/https allowed"
+        host = parsed.hostname or ""
+        if not host:
+            return False, "No hostname"
+        if host in _BLOCKED_HOSTS:
+            return False, f"Blocked host: {host}"
+        # Resolve and check all IPs (guards against DNS rebinding)
+        try:
+            addrs = socket.getaddrinfo(host, None)
+        except socket.gaierror:
+            return False, f"DNS resolution failed for {host}"
+        for (_fam, _typ, _proto, _cname, sockaddr) in addrs:
+            ip_str = sockaddr[0]
+            try:
+                ip = ipaddress.ip_address(ip_str)
+            except ValueError:
+                return False, f"Invalid IP: {ip_str}"
+            if ip.is_loopback or ip.is_link_local or ip.is_private or \
+               ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+                return False, f"Private/reserved address blocked: {ip_str}"
+            # Extra IPv4 range check
+            if ip.version == 4:
+                n = int(ip)
+                for (net, mask) in _PRIVATE_RANGES:
+                    if (n & mask) == net:
+                        return False, f"Private range blocked: {ip_str}"
+        return True, "ok"
+    except Exception as e:
+        return False, f"URL safety check error: {e}"
+
+
 def read_url(url: str) -> str:
-    """Seite abrufen und als Klartext zurückgeben (requests+BS4, urllib fallback)."""
+    """Fetch a public web page and return plain text (SSRF-protected, max 3000 chars)."""
     if not url.startswith(("http://", "https://")):
         return "Error: URL must start with http:// or https://"
+    safe, reason = _is_safe_url(url)
+    if not safe:
+        return f"Error: URL blocked for security reasons — {reason}"
     headers = {"User-Agent": "Mozilla/5.0 (compatible; Lukas-Agent/1.0)"}
     try:
-        # Primary: requests + BeautifulSoup (install: pip install requests beautifulsoup4)
+        # Primary: requests + BeautifulSoup (pip install requests beautifulsoup4)
         import requests
         from bs4 import BeautifulSoup
-        resp = requests.get(url, headers=headers, timeout=15, stream=True)
+        import re
+        resp = requests.get(
+            url, headers=headers, timeout=(5, 10), stream=True,
+            allow_redirects=False  # validate redirects manually
+        )
+        # Follow redirect with SSRF check
+        if resp.is_redirect or resp.status_code in (301, 302, 303, 307, 308):
+            redirect_url = resp.headers.get("Location", "")
+            ok, msg = _is_safe_url(redirect_url)
+            if not ok:
+                return f"Error: Redirect target blocked — {msg}"
+            resp = requests.get(redirect_url, headers=headers, timeout=(5, 10),
+                                stream=True, allow_redirects=False)
         resp.raise_for_status()
-        # Read max 120KB
         raw = b""
         for chunk in resp.iter_content(chunk_size=8192):
             raw += chunk
@@ -146,7 +221,6 @@ def read_url(url: str) -> str:
             for tag in soup(["script", "style", "nav", "footer", "aside"]):
                 tag.decompose()
             text = soup.get_text(separator=" ", strip=True)
-            import re
             text = re.sub(r" {2,}", " ", text).strip()
         return text[:3000] or "(empty page)"
     except ImportError:
@@ -157,7 +231,15 @@ def read_url(url: str) -> str:
     try:
         import re
         req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=15) as r:
+        # urllib follows redirects by default – intercept via custom opener
+        class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, hdrs, newurl):
+                ok, reason_ = _is_safe_url(newurl)
+                if not ok:
+                    raise ValueError(f"Redirect target blocked: {reason_}")
+                return super().redirect_request(req, fp, code, msg, hdrs, newurl)
+        opener = urllib.request.build_opener(_NoRedirectHandler)
+        with opener.open(req, timeout=10) as r:
             raw = r.read(120_000)
             content_type = r.headers.get("Content-Type", "")
         text = raw.decode("utf-8", errors="replace")
