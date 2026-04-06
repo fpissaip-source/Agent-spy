@@ -305,66 +305,67 @@ def sensor_thread():
 # ═══════════════════════════════════════════════════════════════════════════
 
 def thinker_thread():
-    print("[Thinker] Started.")
+    print("[Thinker] Started.", flush=True)
     next_wakeup = _read_next_wakeup()
+    _last_tick_min = -1
 
     while not _stop_event.is_set():
-        # ── Decision: should I act now? ────────────────────────────────────
-        print(f"[Thinker] Scheduling next session in {next_wakeup} min.")
+        print(f"[Thinker] Scheduling next session in {next_wakeup} min.", flush=True)
         deadline = time.time() + next_wakeup * 60
 
         woken_early = False
         while not _stop_event.is_set():
-            # Check result_queue for completed sessions (updates our timing)
             try:
                 res = result_queue.get_nowait()
                 if res.get("type") == "done":
                     next_wakeup = res.get("next_wakeup", 30)
-                    print(f"[Thinker] Session done. Next wakeup: {next_wakeup} min.")
+                    print(f"[Thinker] Session done. Next wakeup: {next_wakeup} min.", flush=True)
                     break
             except queue.Empty:
                 pass
 
-            # Check event_queue for Sensor signals
             try:
                 ev = event_queue.get_nowait()
                 if ev.get("type") == "wake":
-                    print("[Thinker] Wake event received — triggering session early.")
+                    print("[Thinker] Wake event received — triggering session early.", flush=True)
                     woken_early = True
                     break
                 elif ev.get("type") == "stop":
-                    print("[Thinker] Stop event received.")
+                    print("[Thinker] Stop event received.", flush=True)
                     _stop_event.set()
                     break
             except queue.Empty:
                 pass
 
-            # Tick down remaining time and update status display
             remaining_s = deadline - time.time()
             if remaining_s <= 0:
-                print("[Thinker] Timer expired — triggering session.")
+                print("[Thinker] Timer expired — triggering session.", flush=True)
                 break
-            set_state(next_run_minutes=max(0, int(remaining_s / 60)))
+
+            rem_min = int(remaining_s / 60)
+            if rem_min != _last_tick_min:
+                _last_tick_min = rem_min
+                print(f"[Thinker] ⏱ {rem_min} min bis nächster Session.", flush=True)
+
+            set_state(next_run_minutes=max(0, rem_min))
             time.sleep(5)
 
         if _stop_event.is_set():
             break
 
-        # ── Dispatch to Actor ───────────────────────────────────────────────
         action_queue.put({"type": "session"})
 
-        # Wait for Actor to finish before rescheduling
         while not _stop_event.is_set():
             try:
                 res = result_queue.get(timeout=5)
                 if res.get("type") == "done":
                     next_wakeup = res.get("next_wakeup", 30)
-                    print(f"[Thinker] Actor done. Next wakeup: {next_wakeup} min.")
+                    print(f"[Thinker] Actor done. Next wakeup: {next_wakeup} min.", flush=True)
                     break
             except queue.Empty:
                 continue
 
-    print("[Thinker] Stopped.")
+    print("[Thinker] Stopped.", flush=True)
 
 
 def _read_next_wakeup(default: int = 30) -> int:
@@ -382,7 +383,7 @@ def _read_next_wakeup(default: int = 30) -> int:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def actor_thread():
-    print("[Actor] Started.")
+    print("[Actor] Started.", flush=True)
 
     while not _stop_event.is_set():
         try:
@@ -395,7 +396,8 @@ def actor_thread():
 
         # ── Phase 1: THINKING — run agent.py ───────────────────────────────
         set_state(status="thinking")
-        print(f"[Actor] Running agent.py at {datetime.now().strftime('%H:%M')}")
+        print(f"[Actor] 🚀 Running agent.py at {datetime.now().strftime('%H:%M')}", flush=True)
+        tg_send(f"🧠 <b>Lukas Session startet</b> ({datetime.now().strftime('%H:%M')})")
 
         try:
             proc = subprocess.run(
