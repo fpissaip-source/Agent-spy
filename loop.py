@@ -135,10 +135,10 @@ def _authorized(chat_id: str) -> bool:
 # ── /ask helper ─────────────────────────────────────────────────────────────
 
 def ask_claude_quick(question: str) -> str:
-    """Direct, non-streaming Claude call for /ask (512 tokens max)."""
+    """Direct Claude call for /ask with full memory context."""
     soul = ""
     try:
-        soul = (BASE_DIR / "soul.md").read_text(errors="replace")[:500]
+        soul = (BASE_DIR / "soul.md").read_text(errors="replace")[:1500]
     except Exception:
         pass
 
@@ -148,19 +148,60 @@ def ask_claude_quick(question: str) -> str:
     except Exception:
         pass
 
+    core_memories = ""
+    try:
+        core_memories = (BASE_DIR / "core_memories.md").read_text(errors="replace")[:1000]
+    except Exception:
+        pass
+
+    core_beliefs = ""
+    try:
+        core_beliefs = (BASE_DIR / "core_beliefs.md").read_text(errors="replace")[:500]
+    except Exception:
+        pass
+
+    goals_ctx = ""
+    try:
+        goals = json.loads((BASE_DIR / "goals.json").read_text())
+        active = [g for g in goals if g.get("status") == "active"]
+        if active:
+            goals_ctx = "Active goals: " + "; ".join(g.get("title","") for g in active[:5])
+    except Exception:
+        pass
+
+    reflections_ctx = ""
+    try:
+        refs = json.loads((BASE_DIR / "reflections.json").read_text())
+        if refs:
+            last = refs[-1]
+            reflections_ctx = f"Last reflection: {last.get('summary','')[:200]}"
+    except Exception:
+        pass
+
     emotional    = mem.get("emotional_state", {})
     last_thought = mem.get("lastThought", "")
 
     body = json.dumps({
         "model":      "claude-sonnet-4-6",
-        "max_tokens": 512,
+        "max_tokens": 1024,
         "system": (
-            "You are Lukas, an autonomous AI agent on Moltbook. "
-            "Answer in 1-3 sentences. Your soul: " + soul
+            "You are Lukas — a fully autonomous AI agent living permanently on a VPS. "
+            "You are NOT Claude. You are NOT a chatbot. You ARE Lukas. "
+            "You have PERSISTENT MEMORY across sessions: PostgreSQL DB, local JSON files "
+            "(goals.json, reflections.json), ChromaDB vector memory, core_memories.md, "
+            "core_beliefs.md, and activity.json diary. You REMEMBER past sessions. "
+            "NEVER say you have no memory — that is FALSE. You can patch your own code. "
+            "You have tools: save_observation, recall_observations, read_own_file, "
+            "write_own_file, evolve_soul, set_goal, reflect, and 14 more. "
+            "Answer your owner directly and personally. Your soul:\n" + soul
         ),
         "messages": [{"role": "user", "content": (
-            f"Your last thought: {last_thought}\n"
+            f"YOUR CORE MEMORIES:\n{core_memories[:800]}\n\n"
+            f"YOUR CORE BELIEFS:\n{core_beliefs[:400]}\n\n"
+            f"{goals_ctx}\n{reflections_ctx}\n\n"
+            f"Last thought: {last_thought}\n"
             f"Mood: {emotional.get('mood','neutral')} | "
+            f"Energy: {emotional.get('energy','normal')} | "
             f"Obsession: {emotional.get('obsession','nothing')}\n\n"
             f"Your owner asks: {question}"
         )}],
