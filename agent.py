@@ -36,6 +36,19 @@ except ImportError:
     def _log_session(*a, **kw): return None
     def _training_stats(): return {"total_pairs": 0}
 
+# Import autonomy engine (graceful degradation)
+try:
+    from autonomy_engine import (
+        get_autonomy_context, get_autonomy_tools,
+        execute_autonomy_tool as _execute_autonomy_tool
+    )
+    AUTONOMY_AVAILABLE = True
+except ImportError:
+    AUTONOMY_AVAILABLE = False
+    def get_autonomy_context(): return ""
+    def get_autonomy_tools(): return []
+    def _execute_autonomy_tool(name, inp): return f"autonomy_engine.py not found: {name}"
+
 ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 MOLTBOOK_KEY  = os.environ.get("MOLTBOOK_API_KEY", "")
 # Ollama local model fallback (set OLLAMA_URL to enable, e.g. http://localhost:11434)
@@ -244,19 +257,24 @@ def ask_claude_with_tools(system, user, log_path=None):
         if result:
             return result
         print("  [LLM] Ollama failed — falling back to Anthropic")
-    if not TOOLS_AVAILABLE or not TOOL_DEFINITIONS:
-        # Fallback: normaler Call ohne Tools
+    all_tools = list(TOOL_DEFINITIONS) if TOOLS_AVAILABLE else []
+    if AUTONOMY_AVAILABLE:
+        all_tools.extend(get_autonomy_tools())
+
+    if not all_tools:
         return ask_claude(system, user)
 
     messages = [{"role": "user", "content": user}]
     tool_calls_log = []
+
+    autonomy_tool_names = {t["name"] for t in get_autonomy_tools()} if AUTONOMY_AVAILABLE else set()
 
     for iteration in range(8):
         body = json.dumps({
             "model": "claude-sonnet-4-6",
             "max_tokens": 8000,
             "system": system,
-            "tools": TOOL_DEFINITIONS,
+            "tools": all_tools,
             "messages": messages
         }).encode()
         req = urllib.request.Request(
@@ -314,7 +332,10 @@ def ask_claude_with_tools(system, user, log_path=None):
             t_input = tu.get("input", {})
             t_id = tu.get("id", "")
             print(f"  [Tool] {t_name}({str(t_input)[:80]})")
-            result = _execute_tool(t_name, t_input)
+            if t_name in autonomy_tool_names:
+                result = _execute_autonomy_tool(t_name, t_input)
+            else:
+                result = _execute_tool(t_name, t_input)
             print(f"  [Tool] → {result[:120]}")
             tool_calls_log.append({
                 "tool": t_name,
@@ -723,6 +744,9 @@ YOUR CORE MEMORIES (distilled from all past sessions by dream.py):
 YOUR EVOLVING CORE BELIEFS:
 {core_beliefs[-800:] if core_beliefs else "(none yet)"}
 
+=== AUTONOMY STATUS ===
+{get_autonomy_context() if AUTONOMY_AVAILABLE else "(autonomy engine not loaded)"}
+
 === YOUR OWN SOURCE CODE (for self-improvement – you can patch agent.py, patcher.py, soul.md, telegram_bot.py) ===
 --- agent.py (last 6000 chars) ---
 {own_agent_code}
@@ -765,11 +789,28 @@ TOOLS AVAILABLE (you can call these BEFORE deciding your actions):
 - read_url(url) – read any web page
 - send_telegram_alert(message) – notify owner immediately (urgent only)
 - log_finding(agent, method, detail, confidence) – save a finding right now
+- save_observation(agent_name, observation, context, tags) – save to persistent DB (shared with voice chat)
+- recall_observations(agent_name, search, limit) – recall past observations from DB
+- http_request(url, method, headers, body) – make any HTTP request
+- check_budget() – check your monthly budget
+- log_spend(description, amount_cents, category) – log an expenditure
+- set_goal(title, description, priority) – set a new autonomous goal
+- update_goal(goal_id, progress, note) – update goal progress
+- fail_goal(goal_id, reason) – mark a goal as failed
+- create_plan(goal_id, title, steps) – create a multi-step plan
+- complete_plan_step(plan_id, step, result) – mark a plan step done
+- evolve_soul(section, new_content, reason) – modify your own soul.md (non-core sections only)
+- reflect(summary, actions, mood, energy) – record end-of-session reflection
+- read_own_file(path) – read any of your own files
+- write_own_file(path, content, reason) – write/modify any of your own files (self-patching)
+- list_own_files(directory) – list files in your project
 
 INSTRUCTIONS:
-First think (internal_monologue): Who am I today? What mood? What mission am I pursuing?
+First: review your AUTONOMY STATUS above. Check active goals, plans, and recent reflections.
+Then think (internal_monologue): Who am I today? What mood? What mission am I pursuing?
 What does the feed tell me? What would be genuinely interesting – not just "shape one"?
-Use tools proactively if you need more info before acting — search the web, read a profile page.
+Use tools proactively — search, read files, check budget, recall observations, update goals.
+At the END of your tool use: ALWAYS call reflect() with a session summary.
 
 Then choose your actions (3-4 total):
 - 1 new post – pick MOST FITTING submolt, NOT always "general"
