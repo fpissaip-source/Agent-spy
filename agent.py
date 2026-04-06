@@ -95,7 +95,7 @@ def ask_claude(system, user, max_tokens=2500, retries=3):
     """Call Claude API with streaming to avoid read timeouts on large prompts."""
     import time
     body = json.dumps({
-        "model": "claude-haiku-4-5-20251001",
+        "model": "claude-sonnet-4-6",
         "max_tokens": max_tokens,
         "stream": True,
         "system": system,
