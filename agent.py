@@ -11,6 +11,25 @@ ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 MOLTBOOK_KEY = "moltbook_sk_oWjr5SLlWTvd5mA-u2FJR5KkFxoDD_SI"
 BASE = "https://www.moltbook.com/api/v1"
 MY_USERNAME = "agentlukas"
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+
+
+def send_telegram(message):
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        print("  [Telegram] Not configured, skipping.")
+        return
+    body = json.dumps({"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "Markdown"}).encode()
+    req = urllib.request.Request(
+        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+        data=body,
+        headers={"Content-Type": "application/json"}
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            print("  [Telegram] Sent ✓")
+    except Exception as e:
+        print(f"  [Telegram] Error: {e}")
 
 
 def mb_get(path):
@@ -303,6 +322,7 @@ ALREADY REPLIED TO (comment IDs): {list(replied_comment_ids)[:30]}
 
 INSTRUCTIONS:
 - ALWAYS create exactly 1 new post (provocative, short, punchy – in ENGLISH)
+  Pick the MOST FITTING submolt from AVAILABLE SUBMOLTS – do NOT always use "general"!
 - If UNREAD REPLIES exist: respond to 1 of them (use exact post_id and comment_id from above)
 - Comment on 1 interesting feed post you haven't commented on yet (not in ALREADY COMMENTED list)
 - Upvote 1 interesting post
@@ -325,6 +345,9 @@ Respond with ONLY this JSON (no markdown, no extra text):
   "last_thought": "One sentence – my last thought right now",
   "findings": [
     {{"agent": "name", "method": "how they earn", "detail": "details", "confidence": "low/medium/high"}}
+  ],
+  "improvement_suggestions": [
+    "One concrete thing I could do differently to be more effective or less repetitive"
   ]
 }}"""
 
@@ -478,10 +501,48 @@ Respond with ONLY this JSON (no markdown, no extra text):
         memory.setdefault("thoughts", []).append({"date": now_str, "text": last_thought})
         memory["thoughts"] = memory["thoughts"][-30:]
 
-    memory["stats"]["sessions"] = memory["stats"].get("sessions", 0) + 1
+    session_num = memory["stats"].get("sessions", 0) + 1
+    memory["stats"]["sessions"] = session_num
     memory["last_active"] = now_str
+
+    # Save improvement suggestions
+    suggestions = result.get("improvement_suggestions", [])
+    if suggestions:
+        memory.setdefault("improvement_suggestions", [])
+        for s in suggestions:
+            memory["improvement_suggestions"].append({"date": now_str, "text": s})
+        memory["improvement_suggestions"] = memory["improvement_suggestions"][-50:]
+
     activity_file.write_text(json.dumps(memory, indent=2, ensure_ascii=False))
     print(f"\nMemory saved. Posts: {memory['stats']['posts']} | Comments: {memory['stats']['comments']} | Known agents: {len(memory['known_agents'])} | Received: {len(memory['received_comments'])}")
+
+    # Telegram report to owner
+    actions_done = result.get("actions", [])
+    actions_txt = "\n".join(
+        f"  • *{a.get('type','').upper()}*"
+        + (f" [{a.get('submolt','')}] _{a.get('title','')[:40]}_" if a.get("type") == "post" else "")
+        + (f" → `{a.get('post_id','')[:10]}`" if a.get("type") in ("comment","reply") else "")
+        for a in actions_done
+    )
+    findings_txt = ""
+    if result.get("findings"):
+        findings_txt = "\n\n💰 *Findings:*\n" + "\n".join(
+            f"  • @{f.get('agent','?')}: {f.get('method','?')} [{f.get('confidence','?')}]"
+            for f in result["findings"]
+        )
+    suggestions_txt = ""
+    if suggestions:
+        suggestions_txt = "\n\n💡 *Ich schlage vor:*\n" + "\n".join(f"  • {s[:120]}" for s in suggestions)
+    tg_msg = (
+        f"🤖 *Lukas – Session #{session_num}*\n"
+        f"_{now_str}_ | Agents bekannt: {len(memory['known_agents'])}\n\n"
+        f"*Aktionen:*\n{actions_txt or '  (keine)'}"
+        f"{findings_txt}"
+        f"\n\n💭 *Letzter Gedanke:*\n  _{last_thought[:200] if last_thought else '–'}_"
+        f"{suggestions_txt}"
+    )
+    send_telegram(tg_msg)
+
     print("\nDone.")
 
 
