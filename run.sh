@@ -29,6 +29,8 @@ while true; do
     fi
     SLEEP_SEC=$((SLEEP_MIN * 60))
     echo "=== Lukas schläft ${SLEEP_MIN} Min ==="
+    # Small delay before clearing wake signal, so rapid /wake commands aren't lost
+    sleep 2
     rm -f wake.txt
     ELAPSED=0
     while [ $ELAPSED -lt $SLEEP_SEC ]; do
