@@ -475,10 +475,17 @@ def _handle_sigterm(signum, frame):
     _stop_event.set()
 
 
+def _write_pid():
+    try:
+        (BASE_DIR / "loop.pid").write_text(str(os.getpid()))
+    except Exception:
+        pass
+
+
 if __name__ == "__main__":
     print(
         f"[Lukas Event-Loop] Starting at "
-        f"{datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        f"{datetime.now().strftime('%Y-%m-%d %H:%M')}  (PID {os.getpid()})"
     )
     if not TELEGRAM_TOKEN:
         print("  WARNING: TELEGRAM_BOT_TOKEN not set — Telegram disabled.")
@@ -488,6 +495,8 @@ if __name__ == "__main__":
         print("  WARNING: TELEGRAM_CHAT_ID not set — no authorization enforced.")
 
     signal.signal(signal.SIGTERM, _handle_sigterm)
+    signal.signal(signal.SIGHUP, signal.SIG_IGN)
+    _write_pid()
 
     _write_status()   # initial status file
 
