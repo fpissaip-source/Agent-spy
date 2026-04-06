@@ -38,19 +38,22 @@
     overflow-x: hidden;
   }
 
-  /* ── HERO / BRAIN CANVAS ── */
+  /* ── FULLPAGE BRAIN CANVAS ── */
+  canvas#brain {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 0;
+    pointer-events: none;
+  }
+
+  /* ── HERO ── */
   .hero {
     position: relative;
     width: 100%;
     height: 620px;
-    overflow: hidden;
-  }
-
-  canvas#brain {
-    position: absolute;
-    top: 0; left: 0;
-    width: 100%;
-    height: 100%;
+    z-index: 1;
   }
 
   .hero-overlay {
@@ -59,8 +62,8 @@
     background: linear-gradient(180deg,
       transparent 0%,
       transparent 40%,
-      rgba(6,6,11,0.4) 70%,
-      var(--bg) 100%
+      rgba(6,6,11,0.2) 70%,
+      rgba(6,6,11,0.5) 100%
     );
     pointer-events: none;
   }
@@ -155,6 +158,7 @@
     background: var(--border);
     position: relative;
     overflow: hidden;
+    z-index: 1;
   }
 
   .pulse-bar-inner {
@@ -176,6 +180,8 @@
 
   /* ── MAIN CONTENT ── */
   .main {
+    position: relative;
+    z-index: 1;
     max-width: 1320px;
     margin: 0 auto;
     padding: 40px 48px 80px;
@@ -186,10 +192,11 @@
 
   /* ── CARDS ── */
   .card {
-    background: var(--card);
+    background: rgba(10, 10, 20, 0.45);
     border: 1px solid var(--border);
     border-radius: 20px;
-    backdrop-filter: blur(40px);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
     transition: border-color 0.3s, box-shadow 0.3s;
   }
 
