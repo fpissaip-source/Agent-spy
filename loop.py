@@ -212,12 +212,18 @@ def sensor_thread():
             print(f"[Sensor] {chat_id}: {text[:80]}")
             cmd = text.lower()
 
-            # ── /ask ───────────────────────────────────────────────────────
+            # ── /ask — run in background so polling isn't blocked ──────────
             if cmd.startswith("/ask "):
                 question = text[5:].strip()
                 tg_send("🤔 <i>Lukas denkt nach...</i>")
-                answer = ask_claude_quick(question)
-                tg_send(f"💬 <b>Lukas:</b>\n{answer}")
+
+                def _ask_worker(q: str):
+                    answer = ask_claude_quick(q)
+                    tg_send(f"💬 <b>Lukas:</b>\n{answer}")
+
+                threading.Thread(
+                    target=_ask_worker, args=(question,), daemon=True
+                ).start()
 
             # ── /status ────────────────────────────────────────────────────
             elif cmd == "/status":
