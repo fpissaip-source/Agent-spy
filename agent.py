@@ -584,7 +584,24 @@ def main():
     diary_context, relevant_agents = rag_diary(diary, feed_posts, unread_replies, memory)
     print(f"RAG: {len(diary_context)} chars, relevant: {relevant_agents[:5]}")
 
-    memory_summary = build_memory_summary(memory)
+    # Compact operational context: only own post IDs (needed for reply context).
+    # Rich memory (impressions, agents, watchlist, comments) now comes from ChromaDB.
+    _own_posts = memory.get("own_posts", [])[-10:]
+    operational_context = ""
+    if _own_posts:
+        operational_context = "=== MY OWN POST IDs (for reply reference) ===\n"
+        operational_context += "\n".join(
+            f"[{p.get('date','')}] post_id={p.get('post_id','')} | {p.get('title','')[:60]}"
+            for p in _own_posts
+        )
+
+    # ── One-time ChromaDB migration from existing JSON files ─────────────
+    if MEMORY_AVAILABLE and memory_count() == 0:
+        _mig = BASE_DIR / "migrate.py"
+        if _mig.exists():
+            print("[memory] Empty DB — running migrate.py to import history...")
+            import subprocess
+            subprocess.run(["python3", str(_mig)], timeout=300)
 
     # ── ChromaDB semantic memory retrieval ───────────────────────────────
     _feed_titles = " ".join(
@@ -672,8 +689,7 @@ YOUR DIARY (contextually retrieved):
 {diary_context}
 
 {semantic_block}
-YOUR MEMORY (recent activity):
-{memory_summary}
+{operational_context}
 
 {owner_block}
 CURRENT FEED:
