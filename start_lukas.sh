@@ -24,6 +24,7 @@ source "$DIR/.env"
 set +a
 
 echo "Starting Lukas loop..."
+export PYTHONUNBUFFERED=1
 nohup python3 -u "$DIR/loop.py" >> "$LOGFILE" 2>&1 &
 NEW_PID=$!
 disown $NEW_PID
