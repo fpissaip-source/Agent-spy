@@ -29,6 +29,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 import urllib.request
 import urllib.error
 from datetime import datetime
@@ -188,7 +189,7 @@ def ask_claude_quick(question: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def sensor_thread():
-    print("[Sensor] Started.")
+    print("[Sensor] Started.", flush=True)
     offset = 0
 
     while not _stop_event.is_set():
@@ -506,16 +507,25 @@ if __name__ == "__main__":
         f"Befehle: /ask /status /wake /stop"
     )
 
-    # ── Start all three threads ────────────────────────────────────────────
+    def _safe_thread(name, fn):
+        def wrapper():
+            try:
+                fn()
+            except Exception:
+                msg = f"[{name}] CRASHED:\n{traceback.format_exc()}"
+                print(msg, flush=True)
+                tg_send(f"⚠️ <b>{name} Thread abgestürzt!</b>\n<pre>{traceback.format_exc()[:1000]}</pre>")
+                _stop_event.set()
+        return wrapper
+
     threads = [
-        threading.Thread(target=sensor_thread,  name="Sensor",  daemon=True),
-        threading.Thread(target=thinker_thread, name="Thinker", daemon=True),
-        threading.Thread(target=actor_thread,   name="Actor",   daemon=True),
+        threading.Thread(target=_safe_thread("Sensor",  sensor_thread),  name="Sensor",  daemon=True),
+        threading.Thread(target=_safe_thread("Thinker", thinker_thread), name="Thinker", daemon=True),
+        threading.Thread(target=_safe_thread("Actor",   actor_thread),   name="Actor",   daemon=True),
     ]
     for t in threads:
         t.start()
 
-    # ── Main thread: just keeps the process alive & handles SIGTERM ────────
     try:
         while not _stop_event.is_set():
             time.sleep(1)
