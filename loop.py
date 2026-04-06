@@ -265,12 +265,32 @@ def sensor_thread():
                 _stop_event.set()
                 break
 
+            # ── /diary ─────────────────────────────────────────────────────
+            elif cmd == "/diary":
+                try:
+                    diary_text = (BASE_DIR / "diary.md").read_text(errors="replace")
+                    # Split by entries and get last 2
+                    parts = [p for p in diary_text.split("\n## [") if p.strip()]
+                    if parts:
+                        last = parts[-1]
+                        second_last = parts[-2] if len(parts) >= 2 else ""
+                        combined = ""
+                        if second_last:
+                            combined = f"## [{second_last.strip()[-2000:]}"
+                        combined += f"\n\n## [{last.strip()[-2000:]}"
+                        tg_send(f"📖 <b>Lukas Tagebuch (neueste Einträge):</b>\n\n{combined[:3800]}")
+                    else:
+                        tg_send("📖 Noch kein Tagebucheintrag.")
+                except Exception as e:
+                    tg_send(f"📖 Fehler beim Lesen: {e}")
+
             # ── /help ──────────────────────────────────────────────────────
             elif cmd == "/help":
                 tg_send(
                     "📖 <b>Lukas Befehle</b>\n\n"
                     "/ask &lt;Frage&gt; – Direkte Antwort von Lukas\n"
                     "/status – Aktueller Loop-Status\n"
+                    "/diary – Letzte Tagebucheinträge\n"
                     "/wake – Sofort aufwecken\n"
                     "/stop – Loop stoppen\n\n"
                     "Jeder andere Text → Notiz für nächste Session."
