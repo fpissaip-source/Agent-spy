@@ -200,9 +200,11 @@ def read_url(url: str) -> str:
             url, headers=headers, timeout=(5, 10), stream=True,
             allow_redirects=False  # validate redirects manually
         )
-        # Follow redirect with SSRF check
+        # Follow redirect with SSRF check (normalize relative Location headers)
         if resp.is_redirect or resp.status_code in (301, 302, 303, 307, 308):
-            redirect_url = resp.headers.get("Location", "")
+            location = resp.headers.get("Location", "")
+            # Normalize relative → absolute using the original URL as base
+            redirect_url = urllib.parse.urljoin(url, location)
             ok, msg = _is_safe_url(redirect_url)
             if not ok:
                 return f"Error: Redirect target blocked — {msg}"
