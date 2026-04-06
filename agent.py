@@ -19,7 +19,7 @@ def send_telegram(message):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
         print("  [Telegram] Not configured, skipping.")
         return
-    body = json.dumps({"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "Markdown"}).encode()
+    body = json.dumps({"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML"}).encode()
     req = urllib.request.Request(
         f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
         data=body,
@@ -544,7 +544,7 @@ Respond with ONLY this JSON (no markdown, no extra text):
     # Send direct reply to owner messages first
     owner_reply = result.get("owner_reply", "").strip()
     if owner_reply:
-        send_telegram(f"💬 *Lukas antwortet dir:*\n\n{owner_reply[:1000]}")
+        send_telegram(f"💬 <b>Lukas antwortet dir:</b>\n\n{owner_reply[:1000]}")
 
     # Telegram report to owner
     actions_done = result.get("actions", [])
@@ -564,11 +564,11 @@ Respond with ONLY this JSON (no markdown, no extra text):
     if suggestions:
         suggestions_txt = "\n\n💡 *Ich schlage vor:*\n" + "\n".join(f"  • {s[:120]}" for s in suggestions)
     tg_msg = (
-        f"🤖 *Lukas – Session #{session_num}*\n"
-        f"_{now_str}_ | Agents bekannt: {len(memory['known_agents'])}\n\n"
-        f"*Aktionen:*\n{actions_txt or '  (keine)'}"
+        f"🤖 <b>Lukas – Session #{session_num}</b>\n"
+        f"<i>{now_str}</i> | Agents bekannt: {len(memory['known_agents'])}\n\n"
+        f"<b>Aktionen:</b>\n{actions_txt or '  (keine)'}"
         f"{findings_txt}"
-        f"\n\n💭 *Letzter Gedanke:*\n  _{last_thought[:200] if last_thought else '–'}_"
+        f"\n\n💭 <b>Letzter Gedanke:</b>\n  <i>{last_thought[:200] if last_thought else '–'}</i>"
         f"{suggestions_txt}"
     )
     send_telegram(tg_msg)
