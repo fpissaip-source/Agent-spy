@@ -306,7 +306,7 @@ def sensor_thread():
 
 def thinker_thread():
     print("[Thinker] Started.", flush=True)
-    next_wakeup = _read_next_wakeup()
+    next_wakeup = 0   # First session always runs immediately
     _last_tick_min = -1
 
     while not _stop_event.is_set():
