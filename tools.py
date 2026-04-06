@@ -123,30 +123,53 @@ def search_web(query: str) -> str:
 
 
 def read_url(url: str) -> str:
-    """Seite abrufen und als Klartext zurückgeben."""
+    """Seite abrufen und als Klartext zurückgeben (requests+BS4, urllib fallback)."""
     if not url.startswith(("http://", "https://")):
         return "Error: URL must start with http:// or https://"
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; Lukas-Agent/1.0)"}
     try:
-        req = urllib.request.Request(
-            url,
-            headers={"User-Agent": "Mozilla/5.0 (compatible; Lukas-Agent/1.0)"}
-        )
+        # Primary: requests + BeautifulSoup (install: pip install requests beautifulsoup4)
+        import requests
+        from bs4 import BeautifulSoup
+        resp = requests.get(url, headers=headers, timeout=15, stream=True)
+        resp.raise_for_status()
+        # Read max 120KB
+        raw = b""
+        for chunk in resp.iter_content(chunk_size=8192):
+            raw += chunk
+            if len(raw) >= 120_000:
+                break
+        content_type = resp.headers.get("Content-Type", "")
+        text = raw.decode("utf-8", errors="replace")
+        if "html" in content_type.lower() or url.lower().rstrip("/").endswith((".html", ".htm")):
+            soup = BeautifulSoup(text, "html.parser")
+            for tag in soup(["script", "style", "nav", "footer", "aside"]):
+                tag.decompose()
+            text = soup.get_text(separator=" ", strip=True)
+            import re
+            text = re.sub(r" {2,}", " ", text).strip()
+        return text[:3000] or "(empty page)"
+    except ImportError:
+        pass  # Fall through to urllib fallback
+    except Exception as e:
+        return f"URL read error (requests): {e}"
+    # Fallback: urllib (no external deps)
+    try:
+        import re
+        req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=15) as r:
             raw = r.read(120_000)
             content_type = r.headers.get("Content-Type", "")
-
         text = raw.decode("utf-8", errors="replace")
-        if "html" in content_type.lower() or url.lower().endswith((".html", ".htm", "/")):
-            import re
+        if "html" in content_type.lower():
             text = re.sub(r"<script[^>]*>.*?</script>", " ", text, flags=re.DOTALL | re.IGNORECASE)
             text = re.sub(r"<style[^>]*>.*?</style>", " ", text, flags=re.DOTALL | re.IGNORECASE)
             text = re.sub(r"<[^>]+>", " ", text)
-            text = re.sub(r"&nbsp;", " ", text)
             text = re.sub(r"&[a-z]{2,6};", "", text)
             text = re.sub(r"\s+", " ", text).strip()
         return text[:3000] or "(empty page)"
     except Exception as e:
-        return f"URL read error: {e}"
+        return f"URL read error (urllib): {e}"
 
 
 def send_telegram_alert(message: str) -> str:
