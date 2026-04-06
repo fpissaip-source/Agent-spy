@@ -91,12 +91,12 @@ def solve_verification(verification):
         print(f"  Verification error: {e}")
 
 
-def ask_claude(system, user, max_tokens=2500, retries=3):
-    """Call Claude API with streaming to avoid read timeouts on large prompts."""
+def ask_claude(system, user, retries=3):
+    """Streaming Claude API call – avoids read timeout on large prompts."""
     import time
     body = json.dumps({
         "model": "claude-sonnet-4-6",
-        "max_tokens": max_tokens,
+        "max_tokens": 3000,
         "stream": True,
         "system": system,
         "messages": [{"role": "user", "content": user}]
@@ -113,14 +113,14 @@ def ask_claude(system, user, max_tokens=2500, retries=3):
             }
         )
         try:
-            print(f"  [Claude] Attempt {attempt}/{retries} (streaming)...")
+            print(f"  [Claude] Versuch {attempt}/{retries} (streaming)...")
             full_text = ""
             with urllib.request.urlopen(req, timeout=300) as r:
                 for raw_line in r:
-                    line = raw_line.decode("utf-8").strip()
-                    if not line.startswith("data: "):
+                    ln = raw_line.decode("utf-8").strip()
+                    if not ln.startswith("data: "):
                         continue
-                    data_str = line[6:]
+                    data_str = ln[6:]
                     if data_str == "[DONE]":
                         break
                     try:
@@ -132,24 +132,20 @@ def ask_claude(system, user, max_tokens=2500, retries=3):
                     except Exception:
                         pass
             if full_text:
-                print(f"  [Claude] OK - {len(full_text)} chars received")
+                print(f"  [Claude] OK – {len(full_text)} Zeichen empfangen")
                 return full_text
-            else:
-                print(f"  [Claude] Empty response on attempt {attempt}")
+            print(f"  [Claude] Leere Antwort (Versuch {attempt})")
         except urllib.error.HTTPError as e:
-            err_body = e.read().decode()[:300]
-            print(f"  [Claude] HTTP {e.code} attempt {attempt}: {err_body}")
+            print(f"  [Claude] HTTP {e.code}: {e.read().decode()[:200]}")
             if e.code in (400, 401, 403):
                 return None
         except Exception as e:
-            print(f"  [Claude] Error attempt {attempt}: {e}")
-
+            print(f"  [Claude] Fehler Versuch {attempt}: {e}")
         if attempt < retries:
             wait = 5 * attempt
-            print(f"  [Claude] Retrying in {wait}s...")
+            print(f"  [Claude] Retry in {wait}s...")
             time.sleep(wait)
-
-    print("Claude API: all attempts failed.")
+    print("Claude API: Alle Versuche fehlgeschlagen.")
     return None
 
 def load_memory(activity_file):
@@ -543,29 +539,45 @@ Respond ONLY this JSON:
 
     print(f"Claude response: {response[:300]}...")
 
-    def clean_json(s):
-        """Remove trailing commas and other common JSON issues."""
+    def _repair_json(s):
+        """Fix unescaped control chars inside JSON strings (char-by-char)."""
         import re
-        # Extract JSON object
+        # Extract outermost JSON object
         try:
-            start = s.index("{")
-            end = s.rindex("}") + 1
-            s = s[start:end]
+            s = s[s.index("{"):s.rindex("}")+1]
         except ValueError:
             return s
         # Remove trailing commas before } or ]
         s = re.sub(r',\s*([}\]])', r'\1', s)
-        return s
+        # Fix unescaped newlines/tabs inside string values
+        out, in_str, esc = [], False, False
+        for ch in s:
+            if esc:
+                out.append(ch); esc = False
+            elif ch == "\\":
+                out.append(ch); esc = True
+            elif ch == '"':
+                in_str = not in_str; out.append(ch)
+            elif in_str and ch == "\n":
+                out.append("\\n")
+            elif in_str and ch == "\r":
+                out.append("\\r")
+            elif in_str and ch == "\t":
+                out.append("\\t")
+            else:
+                out.append(ch)
+        return "".join(out)
 
     result = None
-    for attempt_json in [response, clean_json(response)]:
+    for _attempt in [response, _repair_json(response)]:
         try:
-            result = json.loads(attempt_json)
+            result = json.loads(_attempt)
             break
-        except Exception as e:
-            print(f"JSON parse error: {e}")
+        except Exception as _e:
+            print(f"JSON parse error: {_e}")
     if result is None:
-        print("Could not parse Claude response as JSON – skipping session.")
+        print("JSON nicht parsebar – Session wird übersprungen.")
+        send_telegram("⚠️ Lukas: JSON-Fehler, Session übersprungen. Prüfe Logs.")
         return
 
     # Execute and record every action
