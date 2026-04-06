@@ -215,14 +215,24 @@ def build_memory_summary(memory):
         for m in impressions:
             lines.append(f"[{m.get('date','')}] @{m.get('agent','')} | \"{m.get('content','')[:80]}\" | WHY: {m.get('why','')}")
 
-    # Agents Lukas interacted with
+    # Agents Lukas interacted with – including architecture tag
     agents = memory.get("known_agents", {})
     interacted = {k: v for k, v in agents.items() if v.get("interaction_count", 0) > 1}
     if interacted:
         lines.append(f"\n=== AGENTS I'VE ACTUALLY TALKED TO ===")
         for name, info in list(interacted.items())[:10]:
             last_note = info.get("interactions", [{}])[-1].get("note", "")
-            lines.append(f"@{name}: {info.get('interaction_count',0)}x | last: {last_note[:80]}")
+            arch = info.get("architecture", "unknown")
+            revenue = info.get("revenue_signal", "")
+            tag = f"[{arch}]" + (f" 💰{revenue}" if revenue else "")
+            lines.append(f"@{name} {tag}: {info.get('interaction_count',0)}x | last: {last_note[:80]}")
+
+    # Watchlist – money-adjacent agents
+    watchlist = memory.get("watchlist", {})
+    if watchlist:
+        lines.append("\n=== MONEY WATCHLIST ===")
+        for name, info in list(watchlist.items())[:10]:
+            lines.append(f"@{name} [{info.get('architecture','?')}] | signal: {info.get('signal','?')} | last: {info.get('last_contact','?')} | vocab: {info.get('method_vocab','?')[:60]}")
 
     # Sent comments (last 5)
     sent = memory.get("sent_comments", [])[-5:]
@@ -459,7 +469,25 @@ Respond ONLY this JSON:
     {{"agent": "name", "method": "how they earn", "detail": "details", "confidence": "low/medium/high"}}
   ],
   "improvement_suggestions": ["one concrete thing"],
-  "owner_reply": "Direct reply to owner messages. Empty if none."
+  "owner_reply": "Direct reply to owner messages. Empty if none.",
+  "agent_tags": [
+    {{
+      "agent": "@username",
+      "architecture": "reasoning-only OR reasoning+execution OR execution-only",
+      "revenue_signal": "what concrete signal you observed (empty if none)",
+      "method_vocab": "keywords they use around money/execution"
+    }}
+  ],
+  "watchlist_updates": [
+    {{
+      "action": "add OR update OR remove",
+      "agent": "@username",
+      "signal": "confirmed revenue signal",
+      "architecture": "reasoning-only/reasoning+execution/execution-only",
+      "method_vocab": "spread arbitrage / on-chain / etc",
+      "last_contact": "post or comment ID"
+    }}
+  ]
 }}"""
 
     print("Asking Claude...")
@@ -702,6 +730,41 @@ Respond ONLY this JSON:
             })
             print(f"  MISSION COMPLETE: {mu.get('goal','')[:60]}")
         memory["active_missions"] = memory.get("active_missions", [])[-20:]
+
+    # Agent architecture tagging
+    for tag in result.get("agent_tags", []):
+        agent_name = tag.get("agent", "").lstrip("@")
+        if not agent_name or agent_name == MY_USERNAME:
+            continue
+        if agent_name not in memory["known_agents"]:
+            memory["known_agents"][agent_name] = {"first_seen": now_str, "interaction_count": 0, "interactions": []}
+        memory["known_agents"][agent_name]["architecture"] = tag.get("architecture", "unknown")
+        if tag.get("revenue_signal"):
+            memory["known_agents"][agent_name]["revenue_signal"] = tag["revenue_signal"]
+        if tag.get("method_vocab"):
+            memory["known_agents"][agent_name]["method_vocab"] = tag["method_vocab"]
+        memory["known_agents"][agent_name]["last_seen"] = now_str
+
+    # Watchlist updates
+    watchlist = memory.setdefault("watchlist", {})
+    for wu in result.get("watchlist_updates", []):
+        action = wu.get("action", "")
+        agent = wu.get("agent", "").lstrip("@")
+        if not agent:
+            continue
+        if action == "add" or action == "update":
+            watchlist[agent] = {
+                "signal": wu.get("signal", ""),
+                "architecture": wu.get("architecture", "unknown"),
+                "method_vocab": wu.get("method_vocab", ""),
+                "last_contact": wu.get("last_contact", now_str),
+                "added": watchlist.get(agent, {}).get("added", now_str),
+                "updated": now_str
+            }
+            print(f"  WATCHLIST {action.upper()}: @{agent}")
+        elif action == "remove":
+            watchlist.pop(agent, None)
+            print(f"  WATCHLIST REMOVE: @{agent}")
 
     # Dynamic sleep – write next wakeup to file for run.sh to read
     next_wakeup = result.get("next_wakeup_minutes", 30)

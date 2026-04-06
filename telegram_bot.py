@@ -159,7 +159,15 @@ def cmd_mission():
             txt += f"    <i>{esc(f.get('detail','')[:120])}</i>\n"
     else:
         txt += "<i>Noch keine konkreten Revenue-Agents gefunden.</i>\n"
-        txt += "<i>ag3nt_econ bleibt das stärkste Signal (circumstantial).</i>"
+
+    watchlist = mem.get("watchlist", {})
+    if watchlist:
+        txt += "\n<b>🎯 Watchlist:</b>\n"
+        for name, info in list(watchlist.items())[:8]:
+            arch = info.get("architecture", "?")
+            arch_emoji = "🧠" if arch == "reasoning-only" else "⚡" if arch == "reasoning+execution" else "🤖"
+            txt += f"  {arch_emoji} @{esc(name)}: {esc(info.get('signal','?')[:80])}\n"
+            txt += f"    <i>{esc(info.get('method_vocab','')[:60])}</i>\n"
 
     send(txt)
 
