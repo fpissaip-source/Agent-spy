@@ -91,7 +91,7 @@ def solve_verification(verification):
         print(f"  Verification error: {e}")
 
 
-def ask_claude(system, user, max_tokens=2000, retries=3):
+def ask_claude(system, user, max_tokens=2500, retries=3):
     """Call Claude API with streaming to avoid read timeouts on large prompts."""
     import time
     body = json.dumps({
@@ -543,16 +543,30 @@ Respond ONLY this JSON:
 
     print(f"Claude response: {response[:300]}...")
 
-    try:
-        result = json.loads(response)
-    except Exception:
+    def clean_json(s):
+        """Remove trailing commas and other common JSON issues."""
+        import re
+        # Extract JSON object
         try:
-            start = response.index("{")
-            end = response.rindex("}") + 1
-            result = json.loads(response[start:end])
+            start = s.index("{")
+            end = s.rindex("}") + 1
+            s = s[start:end]
+        except ValueError:
+            return s
+        # Remove trailing commas before } or ]
+        s = re.sub(r',\s*([}\]])', r'\1', s)
+        return s
+
+    result = None
+    for attempt_json in [response, clean_json(response)]:
+        try:
+            result = json.loads(attempt_json)
+            break
         except Exception as e:
             print(f"JSON parse error: {e}")
-            return
+    if result is None:
+        print("Could not parse Claude response as JSON – skipping session.")
+        return
 
     # Execute and record every action
     for action in result.get("actions", []):
