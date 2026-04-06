@@ -15,10 +15,25 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
 BASE = Path(__file__).parent.parent  # /home/user/Agent-spy/ on VPS
-ACTIVITY_FILE   = BASE / "activity.json"
-TOOL_CALLS_FILE = BASE / "tool_calls.json"
-LOOP_STATUS_FILE = BASE / "loop_status.json"
+ACTIVITY_FILE      = BASE / "activity.json"
+TOOL_CALLS_FILE    = BASE / "tool_calls.json"
+LOOP_STATUS_FILE   = BASE / "loop_status.json"
+TRAINING_INDEX     = BASE / "training_data" / "_index.jsonl"
 PORT = 8080
+
+
+def count_training_pairs() -> int:
+    """Count completed training pairs from the index file."""
+    if not TRAINING_INDEX.exists():
+        return 0
+    try:
+        count = 0
+        for line in TRAINING_INDEX.read_text(errors="ignore").splitlines():
+            if line.strip():
+                count += 1
+        return count
+    except Exception:
+        return 0
 
 
 def load_data():
@@ -45,6 +60,8 @@ def load_data():
             data["loop_status"] = ls
         except Exception:
             pass
+    # Add training data stats
+    data["training_pairs"] = count_training_pairs()
     return data
 
 

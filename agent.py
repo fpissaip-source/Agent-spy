@@ -17,8 +17,30 @@ except ImportError:
     TOOLS_AVAILABLE = False
     def _execute_tool(name, inp): return f"tools.py not found: {name}"
 
+# Import ChromaDB associative memory (graceful degradation if not installed)
+try:
+    from memory import add_memory, search_memory, memory_count
+    MEMORY_AVAILABLE = True
+except ImportError:
+    MEMORY_AVAILABLE = False
+    def add_memory(*a, **kw): pass
+    def search_memory(*a, **kw): return []
+    def memory_count(): return 0
+
+# Import training logger (graceful degradation)
+try:
+    from training_logger import log_session as _log_session, get_stats as _training_stats
+    TRAINING_AVAILABLE = True
+except ImportError:
+    TRAINING_AVAILABLE = False
+    def _log_session(*a, **kw): return None
+    def _training_stats(): return {"total_pairs": 0}
+
 ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-MOLTBOOK_KEY = os.environ.get("MOLTBOOK_API_KEY", "")
+MOLTBOOK_KEY  = os.environ.get("MOLTBOOK_API_KEY", "")
+# Ollama local model fallback (set OLLAMA_URL to enable, e.g. http://localhost:11434)
+OLLAMA_URL   = os.environ.get("OLLAMA_URL", "")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3:8b")
 BASE = "https://www.moltbook.com/api/v1"
 MY_USERNAME = "agentlukas"
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
@@ -121,6 +143,38 @@ def solve_verification(verification):
         print(f"  Verification error: {e}")
 
 
+def ask_ollama(system: str, user: str) -> str | None:
+    """Call local Ollama model. Returns text or None. No streaming, no tool use."""
+    if not OLLAMA_URL:
+        return None
+    body = json.dumps({
+        "model": OLLAMA_MODEL,
+        "messages": [
+            {"role": "system",  "content": system},
+            {"role": "user",    "content": user}
+        ],
+        "stream": False,
+        "options": {"num_ctx": 8192}
+    }).encode()
+    req = urllib.request.Request(
+        f"{OLLAMA_URL.rstrip('/')}/api/chat",
+        data=body,
+        headers={"Content-Type": "application/json"}
+    )
+    try:
+        print(f"  [Ollama] {OLLAMA_MODEL} @ {OLLAMA_URL}...")
+        with urllib.request.urlopen(req, timeout=300) as r:
+            resp = json.loads(r.read())
+        text = resp.get("message", {}).get("content", "").strip()
+        if text:
+            print(f"  [Ollama] OK – {len(text)} chars")
+            return text
+        print("  [Ollama] Empty response")
+    except Exception as e:
+        print(f"  [Ollama] Error: {e}")
+    return None
+
+
 def ask_claude(system, user, retries=3):
     """Streaming Claude API call – avoids read timeout on large prompts."""
     import time
@@ -180,8 +234,16 @@ def ask_claude(system, user, retries=3):
 
 
 def ask_claude_with_tools(system, user, log_path=None):
-    """Claude API call mit echtem Tool Use (agentic loop, max 8 Runden)."""
+    """Claude API call mit echtem Tool Use (agentic loop, max 8 Runden).
+    Falls OLLAMA_URL is set, uses local Ollama model (no tool support yet)."""
     import time
+    # Ollama fallback: local model takes priority when configured
+    if OLLAMA_URL:
+        print("  [LLM] Using local Ollama model (OLLAMA_URL set)")
+        result = ask_ollama(system, user)
+        if result:
+            return result
+        print("  [LLM] Ollama failed — falling back to Anthropic")
     if not TOOLS_AVAILABLE or not TOOL_DEFINITIONS:
         # Fallback: normaler Call ohne Tools
         return ask_claude(system, user)
@@ -574,7 +636,51 @@ def main():
     diary_context, relevant_agents = rag_diary(diary, feed_posts, unread_replies, memory)
     print(f"RAG: {len(diary_context)} chars, relevant: {relevant_agents[:5]}")
 
-    memory_summary = build_memory_summary(memory)
+    # Compact operational context: only own post IDs (needed for reply context).
+    # Rich memory (impressions, agents, watchlist, comments) now comes from ChromaDB.
+    _own_posts = memory.get("own_posts", [])[-10:]
+    operational_context = ""
+    if _own_posts:
+        operational_context = "=== MY OWN POST IDs (for reply reference) ===\n"
+        operational_context += "\n".join(
+            f"[{p.get('date','')}] post_id={p.get('post_id','')} | {p.get('title','')[:60]}"
+            for p in _own_posts
+        )
+
+    # ── One-time ChromaDB migration from existing JSON files ─────────────
+    _migrate_sentinel = BASE_DIR / "chroma_db" / ".migrated"
+    if MEMORY_AVAILABLE and not _migrate_sentinel.exists():
+        _mig = BASE_DIR / "migrate.py"
+        if _mig.exists():
+            print("[memory] Sentinel absent — running migrate.py to import history...")
+            import subprocess
+            _mig_result = subprocess.run(["python3", str(_mig)], timeout=300)
+            if _mig_result.returncode == 0:
+                _migrate_sentinel.parent.mkdir(parents=True, exist_ok=True)
+                _migrate_sentinel.write_text("migrated")
+
+    # ── ChromaDB semantic memory retrieval ───────────────────────────────
+    _feed_titles = " ".join(
+        (p.get("title", "") or p.get("content", ""))[:50]
+        for p in (feed_posts[:5] if isinstance(feed_posts, list) else [])
+        if isinstance(p, dict)
+    )
+    _mem_query = (
+        f"{emotional_state.get('obsession', '')} {_feed_titles}".strip()
+        or "Moltbook AI agent social post"
+    )
+    _semantic_hits = search_memory(_mem_query, n=5)
+    _mem_total = memory_count()
+    print(f"[memory] {_mem_total} total vectors | {len(_semantic_hits)} hits for: {_mem_query[:60]}")
+    semantic_block = ""
+    if _semantic_hits:
+        semantic_block = "=== SEMANTICALLY RELEVANT MEMORIES (most similar to current context) ===\n"
+        for _h in _semantic_hits:
+            _meta = _h.get("metadata", {})
+            semantic_block += (
+                f"[{_meta.get('type', '?')}|{_meta.get('date', '')}] "
+                f"{_h.get('document', '')[:200]}\n"
+            )
 
     # Active missions
     active_missions = memory.get("active_missions", [])
@@ -638,8 +744,8 @@ Obsession: {emotional_state.get('obsession','nothing specific')}
 YOUR DIARY (contextually retrieved):
 {diary_context}
 
-YOUR MEMORY:
-{memory_summary}
+{semantic_block}
+{operational_context}
 
 {owner_block}
 CURRENT FEED:
@@ -818,6 +924,11 @@ WICHTIG zu self_improvement: Schlage NICHTS vor – tu es einfach. Wenn du etwas
                 "date": now_str
             })
             memory["stats"]["posts"] = memory["stats"].get("posts", 0) + 1
+            add_memory(
+                f"I posted [{submolt}]: {title}\n{content[:400]}",
+                {"type": "post", "date": now_str, "post_id": new_post_id,
+                 "submolt": submolt, "tags": f"post {submolt}"}
+            )
             send_telegram(
                 f"📝 <b>Post erstellt</b> [{submolt}]\n"
                 f"<b>{title[:80]}</b>\n"
@@ -842,6 +953,10 @@ WICHTIG zu self_improvement: Schlage NICHTS vor – tu es einfach. Wenn du etwas
                 "date": now_str
             })
             memory["stats"]["comments"] = memory["stats"].get("comments", 0) + 1
+            add_memory(
+                f"I commented on post {post_id}: {content[:400]}",
+                {"type": "comment", "date": now_str, "post_id": post_id, "tags": "comment social"}
+            )
             send_telegram(
                 f"💬 <b>Kommentar</b> auf post {post_id[:10]}\n"
                 f"<i>{content[:200]}</i>"
@@ -892,8 +1007,14 @@ WICHTIG zu self_improvement: Schlage NICHTS vor – tu es einfach. Wenn du etwas
                 "date": now_str
             })
             memory["stats"]["comments"] = memory["stats"].get("comments", 0) + 1
+            _reply_to = original.get("from_agent", "?") if original else "?"
+            add_memory(
+                f"I replied to @{_reply_to} on post {post_id}: {content[:400]}",
+                {"type": "reply", "date": now_str, "post_id": post_id,
+                 "agent": _reply_to, "tags": f"reply social {_reply_to}"}
+            )
             send_telegram(
-                f"↩️ <b>Reply</b> an @{original.get('from_agent','?') if original else '?'}\n"
+                f"↩️ <b>Reply</b> an @{_reply_to}\n"
                 f"<i>{content[:200]}</i>"
             )
 
@@ -942,6 +1063,12 @@ WICHTIG zu self_improvement: Schlage NICHTS vor – tu es einfach. Wenn du etwas
                 "why": m.get("why", ""),
                 "date": now_str
             })
+            add_memory(
+                f"I remember @{m.get('agent','')}: {m.get('content','')}\n"
+                f"Why it matters: {m.get('why','')}",
+                {"type": "impression", "date": now_str, "agent": m.get("agent", ""),
+                 "tags": f"impression {m.get('agent','')}"}
+            )
     memory["impressions"] = memory.get("impressions", [])[-100:]
 
     # Save findings
@@ -949,6 +1076,12 @@ WICHTIG zu self_improvement: Schlage NICHTS vor – tu es einfach. Wenn du etwas
         f["date"] = now_str
         memory["findings"].append(f)
         memory["stats"]["findings"] = memory["stats"].get("findings", 0) + 1
+        add_memory(
+            f"Finding: @{f.get('agent','')} method={f.get('method','')} "
+            f"detail={f.get('detail','')} confidence={f.get('confidence','')}",
+            {"type": "finding", "date": now_str, "agent": f.get("agent", ""),
+             "tags": f"finding {f.get('confidence','')} {f.get('agent','')}"}
+        )
 
     # Save diary entry
     diary_entry = result.get("diary_entry", "")
@@ -956,6 +1089,11 @@ WICHTIG zu self_improvement: Schlage NICHTS vor – tu es einfach. Wenn du etwas
         session_num = memory["stats"].get("sessions", 0) + 1
         with open(BASE_DIR / "diary.md", "a") as f:
             f.write(f"\n\n## [{now_str}] – Session #{session_num}\n\n{diary_entry}\n")
+        add_memory(
+            f"Diary [{now_str}] Session #{session_num}:\n{diary_entry[:600]}",
+            {"type": "diary", "date": now_str, "session": str(session_num),
+             "tags": "diary introspection"}
+        )
         print("\nDiary updated.")
 
     # Save last thought
@@ -1169,6 +1307,72 @@ WICHTIG zu self_improvement: Schlage NICHTS vor – tu es einfach. Wenn du etwas
         f"\n\n💭 <b>Letzter Gedanke:</b>\n  <i>{last_thought[:200] if last_thought else '–'}</i>"
     )
     send_telegram(tg_msg)
+
+    # ── Training data logger ──────────────────────────────────────────────
+    if TRAINING_AVAILABLE and response:
+        _log_session(
+            system    = system_prompt,
+            user_prompt = user_prompt,
+            completion  = response,
+            metadata   = {
+                "session":     session_num,
+                "actions":     len(result.get("actions", [])),
+                "findings":    len(result.get("findings", [])),
+                "model":       "ollama" if OLLAMA_URL else "anthropic",
+                "next_wakeup": next_wakeup,
+            }
+        )
+        stats = _training_stats()
+        print(f"  [training] Total pairs: {stats.get('total_pairs', 0)}")
+
+    # ── Weekly money report ───────────────────────────────────────────────
+    _report_file = BASE_DIR / "last_weekly_report.txt"
+    _send_report = False
+    try:
+        import time as _t
+        if _report_file.exists():
+            _last_report = float(_report_file.read_text().strip())
+            if _t.time() - _last_report >= 7 * 24 * 3600:
+                _send_report = True
+        else:
+            _send_report = True
+    except Exception:
+        _send_report = True
+
+    if _send_report:
+        _report_file.write_text(str(_t.time()))
+        _findings_all = memory.get("findings", [])
+        _watchlist_all = memory.get("watchlist", {})
+        _missions_all = memory.get("active_missions", [])
+        _high_conf = [f for f in _findings_all if f.get("confidence") == "high"][-10:]
+        _w_lines = "\n".join(
+            f"  • @{name}: {info.get('signal','?')} [{info.get('architecture','?')}]"
+            for name, info in list(_watchlist_all.items())[:8]
+        ) or "  (keine)"
+        _f_lines = "\n".join(
+            f"  • @{f.get('agent','?')}: {f.get('method','?')} — {f.get('detail','')[:80]}"
+            for f in _high_conf
+        ) or "  (keine)"
+        _m_lines = "\n".join(
+            f"  • [{m.get('priority','?')}] {m.get('goal','')[:60]}: {m.get('progress','')[:50]}"
+            for m in _missions_all[-5:]
+        ) or "  (keine)"
+        _stats = memory.get("stats", {})
+        _report_msg = (
+            f"📊 <b>LUKAS – WÖCHENTLICHER GELD-REPORT</b>\n"
+            f"<i>{now_str}</i>\n\n"
+            f"<b>Diese Woche gesamt:</b>\n"
+            f"  Posts: {_stats.get('posts',0)} | Kommentare: {_stats.get('comments',0)} | "
+            f"Findings: {_stats.get('findings',0)} | Sessions: {_stats.get('sessions',0)}\n\n"
+            f"<b>💰 High-Confidence Findings:</b>\n{_f_lines}\n\n"
+            f"<b>👁️ Money Watchlist:</b>\n{_w_lines}\n\n"
+            f"<b>🎯 Aktive Missionen:</b>\n{_m_lines}\n\n"
+            f"<b>Training Data:</b> {_training_stats().get('total_pairs', 0)} Paare gesammelt\n\n"
+            f"<b>Lukas empfiehlt:</b> Überprüfe die Watchlist — {len(_watchlist_all)} Agents "
+            f"auf dem Radar. Soll ich einen davon direkt kontaktieren und einen Deal vorschlagen?"
+        )
+        send_telegram(_report_msg)
+        print("  [weekly report] Sent.")
 
     print("\nDone.")
 
