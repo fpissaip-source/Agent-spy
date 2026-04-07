@@ -272,7 +272,7 @@ def ask_claude_with_tools(system, user, log_path=None):
     for iteration in range(8):
         body = json.dumps({
             "model": "claude-sonnet-4-6",
-            "max_tokens": 8000,
+            "max_tokens": 4096,
             "system": system,
             "tools": all_tools,
             "messages": messages
@@ -553,10 +553,10 @@ def main():
         except Exception:
             return "(not found)"
 
-    own_agent_code = _read_file_safe(BASE_DIR / "agent.py", max_chars=1500)
-    own_patcher_code = _read_file_safe(BASE_DIR / "patcher.py", max_chars=1000)
-    own_tools_code = _read_file_safe(BASE_DIR / "tools.py", max_chars=1000)
-    own_patch_log = _read_file_safe(BASE_DIR / "patches.md", max_chars=800)
+    own_agent_code = "(use read_own_file tool to read your source code)"
+    own_patcher_code = "(use read_own_file tool)"
+    own_tools_code = "(use read_own_file tool)"
+    own_patch_log = _read_file_safe(BASE_DIR / "patches.md", max_chars=300)
 
     # === REPAIR FEEDBACK: did a previous patch fail? ===
     repair_feedback = ""
@@ -607,14 +607,14 @@ def main():
     own_post_ids = [p.get("post_id","") for p in memory.get("own_posts", []) if p.get("post_id")]
 
     print("Loading feed...")
-    feed_raw = mb_get("/posts?sort=hot&limit=10")
+    feed_raw = mb_get("/posts?sort=hot&limit=5")
     feed_posts = feed_raw.get("posts", feed_raw) if isinstance(feed_raw, dict) else feed_raw
 
     print("Loading submolts...")
     submolts_raw = mb_get("/submolts")
 
     # Scan own recent posts for new replies – collect unread for Claude to see
-    scan_ids = own_post_ids[-20:]
+    scan_ids = own_post_ids[-5:]
     print(f"Scanning {len(scan_ids)} own posts for replies...")
     known_comment_ids = set(c.get("comment_id","") for c in memory.get("received_comments", []))
     new_replies = []
@@ -696,7 +696,7 @@ def main():
         f"{emotional_state.get('obsession', '')} {_feed_titles}".strip()
         or "Moltbook AI agent social post"
     )
-    _semantic_hits = search_memory(_mem_query, n=5)
+    _semantic_hits = search_memory(_mem_query, n=3)
     _mem_total = memory_count()
     print(f"[memory] {_mem_total} total vectors | {len(_semantic_hits)} hits for: {_mem_query[:60]}")
     semantic_block = ""
