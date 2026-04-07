@@ -393,8 +393,7 @@ class TaskScheduler:
             lines.append(f"  [{pri}] #{t['id']}: {t['action']}")
             if t.get("context"):
                 lines.append(f"    Context: {t['context'][:100]}")
-        return "
-".join(lines)
+        return chr(10).join(lines)
 
 AUTONOMY_TOOL_DEFINITIONS = [
     {
