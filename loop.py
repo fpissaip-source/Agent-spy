@@ -349,8 +349,7 @@ def sensor_thread():
                 def _ask_worker(q: str):
                     try:
                         answer = ask_claude_quick(q)
-                        tg_send(f"💬 <b>Lukas:</b>
-{answer}")
+                        tg_send("💬 Lukas: " + answer)
                     except Exception as ask_err:
                         tg_send(f"/ask FEHLER: {ask_err}")
 
