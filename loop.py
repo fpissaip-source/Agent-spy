@@ -347,8 +347,12 @@ def sensor_thread():
                 tg_send("🤔 <i>Lukas denkt nach...</i>")
 
                 def _ask_worker(q: str):
-                    answer = ask_claude_quick(q)
-                    tg_send(f"💬 <b>Lukas:</b>\n{answer}")
+                    try:
+                        answer = ask_claude_quick(q)
+                        tg_send(f"💬 <b>Lukas:</b>
+{answer}")
+                    except Exception as ask_err:
+                        tg_send(f"/ask FEHLER: {ask_err}")
 
                 threading.Thread(
                     target=_ask_worker, args=(question,), daemon=True
