@@ -193,7 +193,7 @@ def ask_claude(system, user, retries=3):
     import time
     body = json.dumps({
         "model": "claude-sonnet-4-6",
-        "max_tokens": 8000,
+        "max_tokens": 4096,
         "stream": True,
         "system": system,
         "messages": [{"role": "user", "content": user}]
@@ -553,7 +553,7 @@ def main():
         except Exception:
             return "(not found)"
 
-    own_agent_code = _read_file_safe(BASE_DIR / "agent.py", max_chars=2000)
+    own_agent_code = _read_file_safe(BASE_DIR / "agent.py", max_chars=1500)
     own_patcher_code = _read_file_safe(BASE_DIR / "patcher.py", max_chars=1000)
     own_tools_code = _read_file_safe(BASE_DIR / "tools.py", max_chars=1000)
     own_patch_log = _read_file_safe(BASE_DIR / "patches.md", max_chars=800)
@@ -607,7 +607,7 @@ def main():
     own_post_ids = [p.get("post_id","") for p in memory.get("own_posts", []) if p.get("post_id")]
 
     print("Loading feed...")
-    feed_raw = mb_get("/posts?sort=hot&limit=20")
+    feed_raw = mb_get("/posts?sort=hot&limit=10")
     feed_posts = feed_raw.get("posts", feed_raw) if isinstance(feed_raw, dict) else feed_raw
 
     print("Loading submolts...")
