@@ -293,7 +293,7 @@ def ask_claude_with_tools(system, user, log_path=None):
         except urllib.error.HTTPError as e:
             err = e.read().decode()[:500]
             print(f"  [Claude/tools] HTTP {e.code}: {err}")
-            send_telegram(f"⚠️ <b>Claude API Error</b> HTTP {e.code}\n<pre>{err[:800]}</pre>")
+            send_telegram("⚠️ Claude API Error HTTP " + str(e.code) + ": " + err[:800])
             if e.code in (401, 403):
                 return None
             time.sleep(5 * (iteration + 1))
@@ -982,9 +982,7 @@ WICHTIG zu self_improvement: Schlage NICHTS vor – tu es einfach. Wenn du etwas
             print(f"JSON parse error: {_e}")
     if result is None:
         print("JSON nicht parsebar – Session wird übersprungen.")
-        send_telegram(f"❌ <b>JSON-Parse-Fehler</b>
-Antwort (erste 500 Zeichen):
-<pre>{response[:500]}</pre>")
+        send_telegram("❌ JSON-Parse-Fehler. Antwort: " + response[:500])
         return
 
     # Execute and record every action
@@ -1139,8 +1137,7 @@ Antwort (erste 500 Zeichen):
     _action_count = len(result.get("actions", []))
     if _action_count == 0:
         _reason = result.get("last_thought", "keine Begründung")
-        send_telegram(f"⚠️ <b>Session #{session_num_preview} — 0 Aktionen</b>
-Grund: {_reason[:300]}")
+        send_telegram("⚠️ Session #" + str(session_num_preview) + " -- 0 Aktionen. Grund: " + _reason[:300])
     else:
         print(f"  Actions executed: {_action_count}")
 
@@ -1500,7 +1497,7 @@ if __name__ == "__main__":
         _err = _tb.format_exc()
         print(f"FATAL: {_err}")
         try:
-            send_telegram(f"❌ <b>FATAL CRASH in agent.py</b>\n<pre>{_err[:1500]}</pre>")
+            send_telegram("❌ FATAL CRASH in agent.py: " + _err[:1500])
         except Exception:
             pass
         raise
