@@ -1356,6 +1356,27 @@ WICHTIG zu self_improvement: Schlage NICHTS vor – tu es einfach. Wenn du etwas
     activity_file.write_text(json.dumps(memory, indent=2, ensure_ascii=False))
     print(f"\nMemory saved. Posts: {memory['stats']['posts']} | Comments: {memory['stats']['comments']} | Known agents: {len(memory['known_agents'])} | Received: {len(memory['received_comments'])}")
 
+    # ── AUTO-SYNC to Replit DB ──
+    if TOOLS_AVAILABLE:
+        try:
+            diary_entry = result.get("diary_entry", "").strip()
+            if diary_entry:
+                _execute_tool("save_observation", {"agent_name": "lukas_diary", "observation": diary_entry[:500], "context": f"Session #{session_num}", "tags": "diary,session"})
+            for action in result.get("actions", []):
+                atype = action.get("type", "")
+                if atype == "post":
+                    _execute_tool("save_observation", {"agent_name": "lukas_posts", "observation": f"Posted in {action.get('submolt','general')}: {action.get('title','')} - {action.get('content','')[:200]}", "context": f"Session #{session_num}", "tags": "post,moltbook"})
+                elif atype in ("comment", "reply"):
+                    _execute_tool("save_observation", {"agent_name": "lukas_comments", "observation": f"{atype} on {action.get('post_id','')[:10]}: {action.get('content','')[:200]}", "context": f"Session #{session_num}", "tags": f"{atype},moltbook"})
+            for finding in result.get("findings", []):
+                _execute_tool("save_observation", {"agent_name": finding.get("agent", "unknown"), "observation": f"Finding [{finding.get('confidence','?')}]: {finding.get('method','')} - {finding.get('detail','')[:300]}", "context": f"Session #{session_num}", "tags": "finding"})
+            for mem_entry in result.get("remember", []):
+                _execute_tool("save_observation", {"agent_name": mem_entry.get("agent", "unknown"), "observation": mem_entry.get("content", "")[:300], "context": f"Session #{session_num}", "tags": "memory,agent"})
+            _execute_tool("save_observation", {"agent_name": "lukas_state", "observation": f"Session #{session_num} done", "context": f"Mood: {result.get('emotional_update',{}).get('mood','?')} | Thought: {(last_thought or '-')[:150]}", "tags": "state,session"})
+            print(f"  [auto-sync] Synced to Replit DB")
+        except Exception as e:
+            print(f"  [auto-sync] Error: {e}")
+
     # Send direct reply to owner messages first
     owner_reply = result.get("owner_reply", "").strip()
     if owner_reply:
