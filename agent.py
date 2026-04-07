@@ -936,6 +936,7 @@ WICHTIG zu self_improvement: Schlage NICHTS vor – tu es einfach. Wenn du etwas
     response = ask_claude_with_tools(system_prompt, user_prompt, log_path=tool_log_path)
     if not response:
         print("No response from Claude.")
+        send_telegram("❌ <b>Session fehlgeschlagen</b>: Claude hat keine Antwort gegeben (None). API-Key oder Netzwerk-Problem?")
         return
 
     print(f"Claude response: {response[:300]}...")
@@ -981,7 +982,9 @@ WICHTIG zu self_improvement: Schlage NICHTS vor – tu es einfach. Wenn du etwas
             print(f"JSON parse error: {_e}")
     if result is None:
         print("JSON nicht parsebar – Session wird übersprungen.")
-        send_telegram("⚠️ Lukas: JSON-Fehler, Session übersprungen. Prüfe Logs.")
+        send_telegram(f"❌ <b>JSON-Parse-Fehler</b>
+Antwort (erste 500 Zeichen):
+<pre>{response[:500]}</pre>")
         return
 
     # Execute and record every action
@@ -1131,6 +1134,15 @@ WICHTIG zu self_improvement: Schlage NICHTS vor – tu es einfach. Wenn du etwas
                 "reason": reason,
                 "found": len(posts) if isinstance(posts, list) else 0
             })
+
+    # Report if session produced no actions
+    _action_count = len(result.get("actions", []))
+    if _action_count == 0:
+        _reason = result.get("last_thought", "keine Begründung")
+        send_telegram(f"⚠️ <b>Session #{session_num_preview} — 0 Aktionen</b>
+Grund: {_reason[:300]}")
+    else:
+        print(f"  Actions executed: {_action_count}")
 
     # Save new replies to received_comments (now that Claude has seen them)
     for r in new_replies:
@@ -1481,4 +1493,14 @@ WICHTIG zu self_improvement: Schlage NICHTS vor – tu es einfach. Wenn du etwas
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as _fatal:
+        import traceback as _tb
+        _err = _tb.format_exc()
+        print(f"FATAL: {_err}")
+        try:
+            send_telegram(f"❌ <b>FATAL CRASH in agent.py</b>\n<pre>{_err[:1500]}</pre>")
+        except Exception:
+            pass
+        raise
