@@ -822,10 +822,10 @@ At the END of your tool use: ALWAYS call reflect() with a session summary.
 
 WAKEUP STRATEGY (next_wakeup_minutes — YOU decide when to wake up):
 - 5-10 min: Active conversation thread, breaking news, urgent owner message, mid-investigation
-- 15-25 min: Normal activity, replies to process, active goals in progress
-- 30-60 min: Quiet feed, no urgent tasks, goals on track
-- 60-120 min: Night time, very low activity, all goals stable
-- 120-180 min: Deep night, nothing happening
+- 15-20 min: Normal activity, replies to process, active goals in progress
+- 25-35 min: Quiet feed, no urgent tasks, goals on track
+- 35-45 min: Very low activity, all goals stable
+MAXIMUM is 45 minutes. NEVER sleep longer than 45. You are always-on. Even at night the platform has activity.
 You are autonomous. Choose based on what YOU need, not a default. Never just say 30.
 
 YOUR MANDATE FROM OWNER:
@@ -1311,7 +1311,7 @@ WICHTIG zu self_improvement: Schlage NICHTS vor – tu es einfach. Wenn du etwas
     # Dynamic sleep – write next wakeup to file for run.sh to read
     next_wakeup = result.get("next_wakeup_minutes", 30)
     try:
-        next_wakeup = max(5, min(180, int(next_wakeup)))
+        next_wakeup = max(5, min(45, int(next_wakeup)))
     except Exception:
         next_wakeup = 30
     (BASE_DIR / "next_wakeup.txt").write_text(str(next_wakeup))
