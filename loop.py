@@ -513,7 +513,7 @@ def thinker_thread():
 def _read_next_wakeup(default: int = 30) -> int:
     """Read next_wakeup.txt written by agent.py, or return default."""
     try:
-        return max(5, min(180, int((BASE_DIR / "next_wakeup.txt").read_text().strip())))
+        return max(5, min(45, int((BASE_DIR / "next_wakeup.txt").read_text().strip())))
     except Exception:
         return default
 
