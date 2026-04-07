@@ -291,9 +291,10 @@ def ask_claude_with_tools(system, user, log_path=None):
             with urllib.request.urlopen(req, timeout=300) as r:
                 response = json.loads(r.read())
         except urllib.error.HTTPError as e:
-            err = e.read().decode()[:300]
+            err = e.read().decode()[:500]
             print(f"  [Claude/tools] HTTP {e.code}: {err}")
-            if e.code in (400, 401, 403):
+            send_telegram(f"⚠️ <b>Claude API Error</b> HTTP {e.code}\n<pre>{err[:800]}</pre>")
+            if e.code in (401, 403):
                 return None
             time.sleep(5 * (iteration + 1))
             continue
@@ -332,11 +333,15 @@ def ask_claude_with_tools(system, user, log_path=None):
             t_input = tu.get("input", {})
             t_id = tu.get("id", "")
             print(f"  [Tool] {t_name}({str(t_input)[:80]})")
-            if t_name in autonomy_tool_names:
-                result = _execute_autonomy_tool(t_name, t_input)
-            else:
-                result = _execute_tool(t_name, t_input)
-            print(f"  [Tool] → {result[:120]}")
+            try:
+                if t_name in autonomy_tool_names:
+                    result = _execute_autonomy_tool(t_name, t_input)
+                else:
+                    result = _execute_tool(t_name, t_input)
+                print(f"  [Tool] → {result[:120]}")
+            except Exception as tool_err:
+                result = f"Tool error: {tool_err}"
+                print(f"  [Tool] CRASH: {tool_err}")
             tool_calls_log.append({
                 "tool": t_name,
                 "input": t_input,
@@ -356,7 +361,8 @@ def ask_claude_with_tools(system, user, log_path=None):
             })
         messages.append({"role": "user", "content": tool_results})
 
-    print("  [Claude/tools] Max iterations reached")
+    print("  [Claude/tools] Max iterations reached (8 rounds)")
+    send_telegram("⚠️ <b>Claude: Max 8 Tool-Runden erreicht</b> — Session gibt auf")
     return None
 
 
