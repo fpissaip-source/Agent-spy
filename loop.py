@@ -169,8 +169,7 @@ def _fetch_replit_observations(limit=15):
                     agent = obs.get("agent_name", "?")
                     text = obs.get("observation", "")[:150]
                     lines.append(f"[{ts}] {agent}: {text}")
-                return "
-".join(lines)
+                return "\n".join(lines)
             return "(keine Observations in DB)"
     except Exception as e:
         return f"(DB-Abfrage fehlgeschlagen: {e})"
