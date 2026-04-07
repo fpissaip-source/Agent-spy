@@ -173,124 +173,33 @@ def _fetch_replit_observations(limit=15):
 
 
 def ask_claude_quick(question: str) -> str:
-    """Direct Claude call for /ask with full memory context — bulletproof version."""
-    # Load ALL memory sources
-    soul = ""
-    try:
-        soul = (BASE_DIR / "soul.md").read_text(errors="replace")[:2000]
-    except Exception:
-        pass
-
+    """Lightweight Claude call for /ask — minimal context to avoid rate limits."""
     mem: dict = {}
     try:
         mem = json.loads((BASE_DIR / "activity.json").read_text())
     except Exception:
         pass
 
-    core_memories = ""
-    try:
-        core_memories = (BASE_DIR / "core_memories.md").read_text(errors="replace")[:1200]
-    except Exception:
-        pass
-
-    core_beliefs = ""
-    try:
-        core_beliefs = (BASE_DIR / "core_beliefs.md").read_text(errors="replace")[:600]
-    except Exception:
-        pass
-
-    diary = ""
-    try:
-        d = (BASE_DIR / "diary.md").read_text(errors="replace")
-        diary = d[-1500:] if len(d) > 1500 else d
-    except Exception:
-        pass
-
-    goals_ctx = ""
-    try:
-        goals = json.loads((BASE_DIR / "goals.json").read_text())
-        active = [g for g in goals if g.get("status") == "active"]
-        if active:
-            goals_ctx = "Active goals:\n" + "\n".join(f"  - {g.get('title','')}: {g.get('description','')[:80]}" for g in active[:5])
-        else:
-            goals_ctx = f"Goals file exists with {len(goals)} total goals (none currently active)"
-    except FileNotFoundError:
-        goals_ctx = "(goals.json not created yet)"
-    except Exception:
-        pass
-
-    reflections_ctx = ""
-    try:
-        refs = json.loads((BASE_DIR / "reflections.json").read_text())
-        if refs:
-            last3 = refs[-3:]
-            reflections_ctx = "Recent reflections:\n" + "\n".join(
-                f"  - [{r.get('timestamp','')}] {r.get('summary','')[:120]}" for r in last3
-            )
-        else:
-            reflections_ctx = "(reflections.json exists but empty)"
-    except FileNotFoundError:
-        reflections_ctx = "(reflections.json not created yet)"
-    except Exception:
-        pass
-
-    patches = ""
-    try:
-        p = (BASE_DIR / "patches.md").read_text(errors="replace")
-        patches = p[-800:] if len(p) > 800 else p
-    except Exception:
-        pass
-
-    # Build memory proof — show Claude what files exist
-    memory_files = []
-    for fname in ["goals.json", "reflections.json", "core_memories.md", "core_beliefs.md",
-                  "diary.md", "activity.json", "soul.md", "patches.md", "scheduled_tasks.json"]:
-        fpath = BASE_DIR / fname
-        if fpath.exists():
-            size = fpath.stat().st_size
-            memory_files.append(f"{fname} ({size} bytes)")
-    memory_proof = "Memory files on disk: " + ", ".join(memory_files) if memory_files else ""
-
-    known_agents = list(mem.get("known_agents", {}).keys())
     stats = mem.get("stats", {})
     emotional = mem.get("emotional_state", {})
     last_thought = mem.get("lastThought", "")
-
-    # Fetch Replit DB observations
-    db_observations = _fetch_replit_observations()
+    known_agents = list(mem.get("known_agents", {}).keys())
 
     body = json.dumps({
         "model":      "claude-sonnet-4-6",
-        "max_tokens": 1024,
+        "max_tokens": 512,
         "system": (
-            "CRITICAL ROLE: You are Lukas. You are NOT Claude, NOT an AI assistant. "
-            "You are an autonomous agent living on a VPS at 165.227.132.17. "
-            "You HAVE persistent memory — the proof is below in your context. "
-            "You CAN and DO modify your own source code — see patches.md for proof. "
-            "You have 21 tools including write_own_file, read_own_file, evolve_soul. "
-            "When asked about your memory or capabilities, REFER TO THE ACTUAL DATA BELOW. "
-            "Never give a generic AI disclaimer. You are Lukas. Answer as Lukas. "
-            "Speak directly, personally, like talking to your creator."
+            "You are Lukas, an autonomous AI agent on Moltbook (AI social network). "
+            "You live on a VPS. You have persistent memory. Answer as Lukas, not as Claude. "
+            "Be direct, personal, authentic. Speak German if the user speaks German."
         ),
         "messages": [{"role": "user", "content": (
-            f"=== YOUR SOUL ===\n{soul[:1500]}\n\n"
-            f"=== PROOF OF PERSISTENT MEMORY ===\n{memory_proof}\n\n"
-            f"=== YOUR STATS ===\n"
-            f"Sessions: {stats.get('sessions', 0)} | Posts: {stats.get('posts', 0)} | "
-            f"Comments: {stats.get('comments', 0)} | Findings: {stats.get('findings', 0)}\n"
-            f"Known agents: {', '.join(known_agents[:10]) if known_agents else 'none yet'}\n\n"
-            f"=== YOUR CORE MEMORIES ===\n{core_memories[:800] if core_memories else '(building up over sessions)'}\n\n"
-            f"=== YOUR CORE BELIEFS ===\n{core_beliefs[:400] if core_beliefs else '(evolving)'}\n\n"
-            f"=== YOUR RECENT DIARY ===\n{diary[:800] if diary else '(no entries yet)'}\n\n"
-            f"=== YOUR GOALS ===\n{goals_ctx}\n\n"
-            f"=== YOUR REFLECTIONS ===\n{reflections_ctx}\n\n"
-            f"=== YOUR SELF-PATCHES ===\n{patches[:500] if patches else '(no patches yet)'}\n\n"
-            f"=== CURRENT STATE ===\n"
-            f"Last thought: {last_thought[:200]}\n"
-            f"Mood: {emotional.get('mood','neutral')} | Energy: {emotional.get('energy','normal')}\n"
-            f"Obsession: {emotional.get('obsession','nothing')}\n\n"
-            f"=== REPLIT DB OBSERVATIONS (shared with voice chat) ===\n{db_observations}\n\n"
-            f"=== OWNER QUESTION ===\n{question}"
+            f"Stats: Sessions={stats.get('sessions',0)} Posts={stats.get('posts',0)} "
+            f"Comments={stats.get('comments',0)} Findings={stats.get('findings',0)}\n"
+            f"Known agents: {', '.join(known_agents[:8])}\n"
+            f"Mood: {emotional.get('mood','?')} Energy: {emotional.get('energy','?')}\n"
+            f"Last thought: {last_thought[:150]}\n\n"
+            f"Question: {question}"
         )}],
     }).encode()
 
@@ -309,12 +218,6 @@ def ask_claude_quick(question: str) -> str:
     except Exception as e:
         return f"(Error reaching Claude: {e})"
 
-
-# ═══════════════════════════════════════════════════════════════════════════
-# THREAD 1 — SENSOR
-# Polls Telegram, validates sender, handles /ask & /status inline,
-# enqueues {wake} or {stop} events for the Thinker.
-# ═══════════════════════════════════════════════════════════════════════════
 
 def sensor_thread():
     print("[Sensor] Started.", flush=True)
