@@ -553,10 +553,10 @@ def main():
         except Exception:
             return "(not found)"
 
-    own_agent_code = _read_file_safe(BASE_DIR / "agent.py", max_chars=6000)
-    own_patcher_code = _read_file_safe(BASE_DIR / "patcher.py", max_chars=3000)
-    own_tools_code = _read_file_safe(BASE_DIR / "tools.py", max_chars=3000)
-    own_patch_log = _read_file_safe(BASE_DIR / "patches.md", max_chars=2000)
+    own_agent_code = _read_file_safe(BASE_DIR / "agent.py", max_chars=2000)
+    own_patcher_code = _read_file_safe(BASE_DIR / "patcher.py", max_chars=1000)
+    own_tools_code = _read_file_safe(BASE_DIR / "tools.py", max_chars=1000)
+    own_patch_log = _read_file_safe(BASE_DIR / "patches.md", max_chars=800)
 
     # === REPAIR FEEDBACK: did a previous patch fail? ===
     repair_feedback = ""
