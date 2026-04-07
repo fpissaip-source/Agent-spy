@@ -102,6 +102,9 @@ def _write_status():
 def tg_send(text: str):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
         return
+    # Fetch observations from Replit DB (shared with voice chat)
+    db_observations = _fetch_replit_observations()
+
     body = json.dumps({
         "chat_id":    TELEGRAM_CHAT_ID,
         "text":       text[:4000],
@@ -144,6 +147,34 @@ def _authorized(chat_id: str) -> bool:
 
 
 # ── /ask helper ─────────────────────────────────────────────────────────────
+
+def _fetch_replit_observations(limit=15):
+    """Fetch recent observations from Replit PostgreSQL DB."""
+    api_base = os.environ.get("REPLIT_API_BASE", "")
+    api_key = os.environ.get("LUKAS_API_KEY", "")
+    if not api_base:
+        return "(Replit DB not configured)"
+    try:
+        url = f"{api_base}/lukas/observations?limit={limit}"
+        req = urllib.request.Request(url, headers={
+            "X-Lukas-Key": api_key,
+            "Accept": "application/json"
+        })
+        with urllib.request.urlopen(req, timeout=8) as r:
+            data = json.loads(r.read())
+            if isinstance(data, list) and data:
+                lines = []
+                for obs in data[:limit]:
+                    ts = obs.get("created_at", "")[:16]
+                    agent = obs.get("agent_name", "?")
+                    text = obs.get("observation", "")[:150]
+                    lines.append(f"[{ts}] {agent}: {text}")
+                return "
+".join(lines)
+            return "(keine Observations in DB)"
+    except Exception as e:
+        return f"(DB-Abfrage fehlgeschlagen: {e})"
+
 
 def ask_claude_quick(question: str) -> str:
     """Direct Claude call for /ask with full memory context — bulletproof version."""
@@ -259,6 +290,7 @@ def ask_claude_quick(question: str) -> str:
             f"Last thought: {last_thought[:200]}\n"
             f"Mood: {emotional.get('mood','neutral')} | Energy: {emotional.get('energy','normal')}\n"
             f"Obsession: {emotional.get('obsession','nothing')}\n\n"
+            f"=== REPLIT DB OBSERVATIONS (shared with voice chat) ===\n{db_observations}\n\n"
             f"=== OWNER QUESTION ===\n{question}"
         )}],
     }).encode()
