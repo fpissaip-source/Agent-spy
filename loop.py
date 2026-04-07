@@ -102,9 +102,6 @@ def _write_status():
 def tg_send(text: str):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
         return
-    # Fetch observations from Replit DB (shared with voice chat)
-    db_observations = _fetch_replit_observations()
-
     body = json.dumps({
         "chat_id":    TELEGRAM_CHAT_ID,
         "text":       text[:4000],
@@ -582,15 +579,22 @@ def actor_thread():
                 timeout=600,   # 10-minute hard limit per session
             )
             out = proc.stdout
+            err = proc.stderr
             print(out[-3000:] if len(out) > 3000 else out)
             if proc.returncode != 0:
-                print(f"[Actor] agent.py exit {proc.returncode}: {proc.stderr[:300]}")
+                error_msg = f"[Actor] agent.py exit {proc.returncode}:\n{err[:800]}"
+                print(error_msg)
+                tg_send(f"❌ <b>Agent CRASH</b> (exit {proc.returncode})\n<pre>{err[:1500]}</pre>")
+            elif not out.strip():
+                tg_send("⚠️ <b>Agent returned empty output</b> — check lukas.log")
         except subprocess.TimeoutExpired:
             print("[Actor] agent.py timeout (600s)")
-            tg_send("⚠️ Lukas Session Timeout — nächste Session startet normal.")
+            tg_send("❌ <b>Session TIMEOUT</b> (600s limit) — agent.py hing fest")
         except Exception as e:
-            print(f"[Actor] agent.py exception: {e}")
-            tg_send(f"⚠️ Agent Fehler: {e}")
+            import traceback
+            tb = traceback.format_exc()
+            print(f"[Actor] agent.py exception: {e}\n{tb}")
+            tg_send(f"❌ <b>Agent EXCEPTION</b>\n<pre>{str(e)[:500]}\n{tb[:1000]}</pre>")
 
         # ── Phase 2: POSTING — run patcher.py if patches queued ────────────
         si_file = BASE_DIR / "self_improvement.json"
