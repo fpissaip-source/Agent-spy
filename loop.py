@@ -62,6 +62,17 @@ _state: dict = {
     "updated":          datetime.now().strftime("%Y-%m-%d %H:%M"),
 }
 
+# Restore session_count from activity.json so restarts don't reset to 0
+try:
+    _activity = json.loads((BASE_DIR / "activity.json").read_text())
+    _state["session_count"] = _activity.get("stats", {}).get("sessions", 0)
+    _last_active = _activity.get("last_active", "")
+    if _last_active:
+        _state["last_run"] = _last_active
+    print(f"[loop] Restored session_count={_state['session_count']} from activity.json")
+except Exception:
+    pass
+
 _stop_event = threading.Event()   # signals all threads to shut down
 
 
