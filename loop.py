@@ -256,6 +256,9 @@ def ask_claude_quick(question: str) -> str:
     emotional = mem.get("emotional_state", {})
     last_thought = mem.get("lastThought", "")
 
+    # Fetch Replit DB observations
+    db_observations = _fetch_replit_observations()
+
     body = json.dumps({
         "model":      "claude-sonnet-4-6",
         "max_tokens": 1024,
