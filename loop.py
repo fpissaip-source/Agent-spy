@@ -584,17 +584,17 @@ def actor_thread():
             if proc.returncode != 0:
                 error_msg = f"[Actor] agent.py exit {proc.returncode}:\n{err[:800]}"
                 print(error_msg)
-                tg_send(f"❌ <b>Agent CRASH</b> (exit {proc.returncode})\n<pre>{err[:1500]}</pre>")
+                tg_send(f"AGENT CRASH (exit {proc.returncode}):\n{err[:1500]}")
             elif not out.strip():
-                tg_send("⚠️ <b>Agent returned empty output</b> — check lukas.log")
+                tg_send("Agent returned empty output. Check lukas.log")
         except subprocess.TimeoutExpired:
             print("[Actor] agent.py timeout (600s)")
-            tg_send("❌ <b>Session TIMEOUT</b> (600s limit) — agent.py hing fest")
+            tg_send("SESSION TIMEOUT (600s) - agent.py hing fest")
         except Exception as e:
             import traceback
             tb = traceback.format_exc()
             print(f"[Actor] agent.py exception: {e}\n{tb}")
-            tg_send(f"❌ <b>Agent EXCEPTION</b>\n<pre>{str(e)[:500]}\n{tb[:1000]}</pre>")
+            tg_send(f"AGENT EXCEPTION:\n{str(e)[:500]}\n{tb[:1000]}")
 
         # ── Phase 2: POSTING — run patcher.py if patches queued ────────────
         si_file = BASE_DIR / "self_improvement.json"
